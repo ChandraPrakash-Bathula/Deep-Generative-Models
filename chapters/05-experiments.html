@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>5 · Experiments: Brains and Faces</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body data-base="../">
+<div class="layout"><main>
+<div class="article">
+<header class="chhead">
+  <div class="eyebrow">Chapter 5 · Experiments</div>
+  <h1>Experiments: Brains and Faces</h1>
+  <p class="sub">Same network, same recipe, two very different worlds. Here is the full experimental record for both datasets, in the same format, including the cases where the models fail.</p>
+  <div class="meta">Reading time ~15 min</div>
+</header>
+<div class="goals"><h4>By the end of this chapter you will know</h4><ul>
+  <li>exactly how each dataset was prepared and how every model was trained;</li>
+  <li>how reconstruction quality changes with latent size on brains and on faces;</li>
+  <li>where the models fail, and why faces need many more latent numbers than brains.</li>
+</ul></div>
+
+<h2 id="protocol"><span class="k">1.</span>One protocol for everything</h2>
+<p>For the comparisons to mean anything, only one thing may change at a time. So all 39 models share the same encoder and decoder, optimiser, schedule, seed and stopping rule. Between models, only the latent layer (and, for VAEs, the KL weight β) changes.</p>
+<table class="t">
+  <tr><th></th><th>IXI brain MRI</th><th>CelebA faces</th></tr>
+  <tr><td><b>images</b></td><td>T1 axial slices, 128×128, grayscale</td><td>aligned faces, 64×64, colour</td></tr>
+  <tr><td><b>split</b></td><td>by subject: 407 / 87 / 87 people<br>25,879 / 5,528 / 5,514 slices</td><td>official, by identity:<br>162,770 / 19,867 / 19,962 images</td></tr>
+  <tr><td><b>latent sizes</b></td><td class="num">2, 3, 4, 8, 16, 64, 128</td><td class="num">2, 4, 8, 16, 64, 128</td></tr>
+  <tr><td><b>models</b></td><td colspan="2">AE · VAE β = 0.1 · VAE β = 1, all with the same 5-stage conv encoder/decoder (12–15 M parameters)</td></tr>
+  <tr><td><b>training</b></td><td>≤ 100 epochs, early stopping (patience 15)</td><td>≤ 50 epochs, early stopping (patience 10)</td></tr>
+  <tr><td><b>augmentation</b></td><td>flip, ±10° rotation, ±5% zoom/shift, gamma</td><td>flip only (faces are already aligned)</td></tr>
+  <tr><td><b>metrics</b></td><td colspan="2">MSE, PSNR, brain-only PSNR, SSIM, FID (reconstructions and samples), active latent units</td></tr>
+</table>
+
+<h2 id="ixi"><span class="k">2.</span>Brain MRI (IXI)</h2>
+<h3>Dataset and preprocessing</h3>
+<p>IXI is a public collection of MRI scans from <b>581 healthy adults</b> (CC BY-SA 3.0). Each 3-D T1 volume is turned to a standard orientation and divided by its 99.5th-percentile intensity, so every value is between 0 and 1. I keep axial slices from 30% to 80% of the head height (every 2nd slice), drop near-empty ones, pad each slice to a square and resize to 128×128.</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>One test subject, from low in the head to the top</h4><span class="badge real">real</span></div>
+  <div class="lg"><div></div><div class="cols" id="subjCols" style="grid-template-columns:repeat(10,1fr)"></div><div class="rows"></div><img src="../assets/subject_slices.png" alt="slices of one subject"></div>
+  <figcaption><b>Figure 5.1.</b> Ten slices of one person, labelled by relative height. Low slices contain the eyes, sinuses and cerebellum, which are full of small structures; high slices are mostly smooth brain tissue with folds. Keep this in mind for the failure analysis below.</figcaption>
+</div></div>
+<div class="article"><h3>Reconstruction quality</h3></div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>IXI test metrics for every model</h4><span class="badge diag">5,514 test slices</span></div>
+  <div id="ixiTable"></div>
+  <figcaption><b>Figure 5.2.</b> Brain-only PSNR ignores the black background. FID compares the distribution of reconstructions with real test slices (lower is better; real vs real = 5.6). Best value per column in bold.</figcaption>
+</div>
+<div class="fig">
+  <div class="fig-h"><h4>Training curves (z = 16)</h4><span class="badge diag">actual training logs</span></div>
+  <div id="curveChart" class="chart"></div>
+  <figcaption><b>Figure 5.3.</b> Validation reconstruction error per epoch for the AE and the VAE β=0.1 (the VAE's KL term is shown separately in chapter 6). The VAE's error is slightly higher early on because its KL term is ramped in over the first 10 epochs; both settle at a similar level.</figcaption>
+</div></div>
+
+<div class="article">
+<h3>Failure analysis: which slices are hardest?</h3>
+<p>Averages hide a lot. So let's sort all 5,514 test slices by how badly the AE (z = 16) reconstructs them, and look at the best, the median and the worst.</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Best, median and worst reconstructions (z = 16)</h4><span><span class="badge real">real</span> <span class="badge recon">reconstructed</span></span></div>
+  <div class="ctl"><span class="l">model</span><div class="seg" id="failSeg"><button data-v="ae" class="on">AE</button><button data-v="vae01">VAE β=0.1</button></div></div>
+  <div class="lg"><div></div><div></div>
+    <div class="rows"><span>best · real</span><span>reconstruction</span><span>error ×4</span><span>median · real</span><span>reconstruction</span><span>error ×4</span><span>worst · real</span><span>reconstruction</span><span>error ×4</span></div>
+    <img id="failImg" alt="best median worst"></div>
+  <figcaption id="failCap"></figcaption>
+</div></div>
+
+<div class="article">
+<p>The pattern is very clear: <b>every one of the worst slices comes from low in the head</b> (30–34% height: eyes, sinuses, cerebellum), and the best ones come from near the top (70–76%). Low slices pack many small, high-contrast structures into the image, and a 16-number code can't describe them all, so the decoder smears them into a smooth average. High slices are mostly smooth tissue, which a blurry decoder handles well. If you used this model for anomaly detection, a normal low slice would look more "anomalous" than a normal high one, so error thresholds would have to depend on the slice level.</p>
+
+<h2 id="celeba"><span class="k">3.</span>Faces (CelebA)</h2>
+<h3>Dataset and preprocessing</h3>
+<p>CelebA has about 200,000 photos of 10,177 celebrities, already aligned so the eyes are in the same place. I take the standard centre crop (148×148) and resize to 64×64 colour, and use the official split, in which no identity appears in more than one part. Each photo also has 40 yes/no attributes (Male, Smiling, Eyeglasses, …), which I use only to colour latent plots, never for training.</p>
+<div class="warn"><b>Licence rule.</b> CelebA may only be used for non-commercial research, and its photos may not be redistributed. So <b>no real CelebA face appears on this site</b>: every face below is generated by a model, and CelebA reconstruction figures (which would show real faces) are not published.</div>
+<h3>Reconstruction quality</h3>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>CelebA test metrics for every model</h4><span class="badge diag">19,962 test images</span></div>
+  <div id="celTable"></div>
+  <figcaption><b>Figure 5.4.</b> Same columns as Figure 5.2 (on faces there is no background, so brain-only PSNR ≈ PSNR). Real vs real FID = 3.0.</figcaption>
+</div>
+<div class="fig">
+  <div class="fig-h"><h4>Generated faces as the latent size grows (VAE β=0.1, same noise in every row)</h4><span class="badge gen">generated</span></div>
+  <div class="lg"><div></div><div></div><div class="rows"><span>d = 2</span><span>d = 8</span><span>d = 16</span><span>d = 64</span><span>d = 128</span></div><img src="../assets/celeba_by_z.png" alt="faces by latent size"></div>
+  <figcaption><b>Figure 5.5.</b> With 2 numbers there is basically one face whose hair darkness and lighting change. With 16, pose, gender and background appear. With 128, glasses, smiles and hairstyles show up. Faces simply have more independent things to describe than aligned brain slices.</figcaption>
+</div>
+<div class="fig">
+  <div class="fig-h"><h4>What is in the CelebA latent clusters? (VAE β=0.1, d = 128)</h4><span class="badge gen">generated</span></div>
+  <div class="lg"><div></div><div></div><div class="rows"><span>#1</span><span>#2</span><span>#3</span><span>#4</span><span>#5</span><span>#6</span></div><img src="../assets/clusters_celeba_vae01_128.jpg" alt="celeba clusters"></div>
+  <figcaption><b>Figure 5.6.</b> k-means with 6 clusters on the latent codes of the test set. First column: the decoded cluster centre. Then 6 faces generated around that centre. The clusters split by hair colour, skin tone, lighting and background, the biggest sources of pixel variation in face photos.</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="cross"><span class="k">4.</span>Brains vs faces: what each extra number buys</h2>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>PSNR gained over the 2-number model</h4><span class="badge diag">test-set metrics</span></div>
+  <div id="gainChart" class="chart"></div>
+  <figcaption><b>Figure 5.7.</b> Solid lines: brains; dashed: faces. Faces keep gaining almost linearly up to 128 numbers (+8.4 dB for the AE), while brains slow down after 16. On both datasets VAE β=1 stops gaining early, and that's a property of the model, not of the data.</figcaption>
+</div></div>
+
+<div class="article">
+<h3>A control experiment that didn't help</h3>
+<p>On CelebA, most best checkpoints were close to the last epoch, which looked like the models needed more training. So I retrained all 18 CelebA models for 100 epochs instead of 50. Every number moved by about ±0.1 dB and the runs early-stopped anyway. The "best epoch near the end" was just the cosine learning-rate schedule settling down, not under-training. I kept the 50-epoch models.</p>
+
+<div class="warn"><b>Limitations.</b> One seed per model. IXI contains only healthy adults from three London hospitals, so nothing here says how these models behave on pathology or other scanners. Reconstruction metrics on MRI are not evidence of clinical usefulness. FID uses ImageNet features, so on grayscale brain slices it is good for ranking models, not as an absolute realism score.</div>
+<div class="key"><h4>Key takeaways</h4><ul>
+  <li>Same protocol on both datasets; only the latent layer and β change between models.</li>
+  <li>The hardest brain slices are the low ones (eyes, sinuses, cerebellum): small structures don't survive a small code.</li>
+  <li>Faces keep benefiting from more latent numbers far longer than brains do.</li>
+  <li>More training wasn't the answer on CelebA; the schedule just looked like under-training.</li>
+</ul></div>
+<h3>References</h3>
+<ol class="refs">
+  <li>IXI dataset. brain-development.org/ixi-dataset (CC BY-SA 3.0).</li>
+  <li>Liu, Luo, Wang, Tang (2015). Deep Learning Face Attributes in the Wild (CelebA). ICCV.</li>
+  <li>Wang, Bovik, Sheikh, Simoncelli (2004). Image quality assessment: from error visibility to structural similarity (SSIM). <i>IEEE TIP</i>.</li>
+  <li>Heusel et al. (2017). GANs Trained by a Two Time-Scale Update Rule Converge to a Local Nash Equilibrium (FID). NeurIPS.</li>
+</ol>
+<div class="pager"></div>
+</div>
+</main></div>
+<script src="../assets/site.js"></script>
+<script>
+data().then(({D, D2}) => {
+  $("#subjCols").innerHTML = D.subject_slices.pos.map(p => `<span>${Math.round(p * 100)}%</span>`).join("");
+  const table = (el, ds) => {
+    const rows = results(D, ds).sort((a, b) => (a.mk > b.mk) - (a.mk < b.mk) || a.latent_dim - b.latent_dim);
+    const cols = [["psnr_mean", "PSNR", 2, 1], ["masked_psnr_mean", "fg PSNR", 2, 1], ["ssim_mean", "SSIM", 3, 1], ["fid_recon", "FID recon", 1, -1], ["active_units", "active units", 0, 0]];
+    const best = {}; cols.forEach(([k, , , dir]) => { if (dir) best[k] = dir > 0 ? Math.max(...rows.map(r => r[k] ?? -1e9)) : Math.min(...rows.map(r => r[k] ?? 1e9)); });
+    let h = `<table class="t"><tr><th>model</th><th>d</th>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr>`;
+    for (const r of rows) h += `<tr><td style="color:${MCOL[r.mk]};font-weight:600">${MODELS[r.mk]}</td><td class="num">${r.latent_dim}</td>` + cols.map(([k, , dg]) => {
+      const v = r[k]; if (v == null) return `<td class="num">–</td>`; const s = k === "active_units" ? `${v}/${r.latent_dim}` : v.toFixed(dg);
+      return `<td class="num">${best[k] === v ? `<b>${s}</b>` : s}</td>`; }).join("") + "</tr>";
+    el.innerHTML = h + "</table>";
+  };
+  table($("#ixiTable"), "ixi"); table($("#celTable"), "celeba");
+  const a = D.history.v2_ae16, v = D.history.v2_vae16;
+  Plotly.newPlot("curveChart", [
+    {x: a.epoch, y: a.val_loss, name: "AE · validation MSE", mode: "lines", line: {color: MCOL.ae, width: 2.5}},
+    {x: v.epoch, y: v.val_recon, name: "VAE β=0.1 · validation reconstruction MSE", mode: "lines", line: {color: MCOL.vae01, width: 2.5}},
+    {x: a.epoch, y: a.train_loss, name: "AE · train", mode: "lines", line: {color: MCOL.ae, width: 1.5, dash: "dot"}},
+    {x: v.epoch, y: v.train_recon, name: "VAE · train reconstruction", mode: "lines", line: {color: MCOL.vae01, width: 1.5, dash: "dot"}}],
+    lay({xaxis: {title: "epoch", gridcolor: "#eef2f7"}, yaxis: {title: "MSE per pixel", type: "log", gridcolor: "#eef2f7"}, legend: {orientation: "h", y: 1.2, font: {size: 11}}}), PCFG);
+  const getF = seg($("#failSeg"), () => fail());
+  function fail() {
+    const mk = getF(), f = D2.failures[mk];
+    $("#failImg").src = A(`failures_ixi_${mk}_16.png`);
+    const fmt = k => `PSNR ${Math.min(...f[k].psnr)}–${Math.max(...f[k].psnr)} dB, height ${Math.round(100 * Math.min(...f[k].pos))}–${Math.round(100 * Math.max(...f[k].pos))}%`;
+    $("#failCap").innerHTML = `<b>Figure 5.8.</b> ${MODELS[mk]}, z = 16. <b>Best</b>: ${fmt("best")}. <b>Median</b>: ${fmt("median")}. <b>Worst</b>: ${fmt("worst")}. The error maps show where it goes wrong: on the best slices only the fine folds are missed, on the worst ones every small structure around the eyes and cerebellum is smeared.`;
+  }
+  fail();
+  const tr = [];
+  for (const [ds, dash, nm] of [["ixi", "solid", "brains"], ["celeba", "dash", "faces"]]) for (const mk of Object.keys(MODELS)) {
+    const g = results(D, ds).filter(r => r.mk === mk).sort((a, b) => a.latent_dim - b.latent_dim), b0 = g[0].psnr_mean;
+    tr.push({x: g.map(r => r.latent_dim), y: g.map(r => r.psnr_mean - b0), name: `${nm} · ${MODELS[mk]}`, mode: "lines+markers", line: {color: MCOL[mk], dash, width: 2.5}, marker: {size: 6}});
+  }
+  Plotly.newPlot("gainChart", tr, lay({xaxis: logx(), yaxis: {title: "PSNR gain over d = 2 (dB)", gridcolor: "#eef2f7"}, legend: {orientation: "h", y: 1.2, font: {size: 11}}}), PCFG);
+});
+</script>
+</body></html>

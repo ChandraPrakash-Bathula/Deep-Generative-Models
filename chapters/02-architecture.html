@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2 · Inside the Network</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body data-base="../">
+<div class="layout"><main>
+<div class="article">
+<header class="chhead">
+  <div class="eyebrow">Chapter 2 · Architecture</div>
+  <h1>Inside the Network</h1>
+  <p class="sub">Chapter 1 drew the encoder and decoder as two boxes. Now let's open the boxes and follow one brain slice through every layer, then see how the whole thing is trained (including the mistake I made the first time).</p>
+  <div class="meta">Reading time ~14 min</div>
+</header>
+<div class="goals"><h4>By the end of this chapter you will know</h4><ul>
+  <li>how a convolutional encoder shrinks a 128×128 image into a short vector, stage by stage;</li>
+  <li>what the bottleneck and the decoder do, and why I upsample instead of using transposed convolutions;</li>
+  <li>how training works, what overfitting looked like in my first run, and how augmentation and early stopping fixed it.</li>
+</ul></div>
+
+<h2 id="shape"><span class="k">1.</span>The shape of the data, from start to finish</h2>
+<p>Let's start with the big picture before any layer details. The best way to understand this network is to follow the <b>shape</b> of the data as it flows through. Each block below is a tensor: height × width × channels. Step through it.</p>
+</div>
+
+<div class="wide"><div class="fig" id="shapeFig">
+  <div class="fig-h"><h4>The tensor shape through the autoencoder (latent dimension 16)</h4><span class="badge diag">architecture</span></div>
+  <div class="steps"></div>
+  <svg class="dia" viewBox="0 0 1000 320" id="shapeSvg"></svg>
+  <div class="stepnote"></div>
+</div></div>
+
+<div class="article">
+<p>Two things to notice. First, the encoder side trades <b>space for channels</b>: the image gets smaller (128 → 4) while the number of channels grows (1 → 512). Each channel is a "detector" for some pattern, and deeper channels detect bigger, more abstract patterns. Second, the bottleneck is brutal: 8,192 numbers squeezed into 16. That's where all the compression happens.</p>
+
+<h2 id="encoder"><span class="k">2.</span>The encoder, layer by layer</h2>
+<p>Each encoder stage is two small blocks. The first block uses a 3×3 convolution with <b>stride 2</b>, which means the filter jumps 2 pixels at a time and the output is half the size. The second block keeps the size and refines the features. Every convolution is followed by <b>GroupNorm</b> (keeps the numbers in a healthy range, independent of batch size) and <b>SiLU</b> (the non-linearity, a smooth cousin of ReLU).</p>
+<div class="math">$$ h_{\ell+1} = \text{SiLU}\big(\text{GroupNorm}(W_\ell * h_\ell)\big), \qquad \text{SiLU}(a) = a\cdot\sigma(a) $$<div class="c">* is convolution; without the non-linearity all the layers would collapse into one linear map (that's PCA again)</div></div>
+<p>So what do these layers actually see? Here are the real activations of my trained encoder on a test slice. For every stage I show the 8 channels that respond most strongly. Pick a slice and watch how the picture changes from "edges of a brain" to "a 4×4 grid of concepts".</p>
+</div>
+
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Encoder feature maps: the 8 strongest channels at each stage</h4><span class="badge real">actual run</span></div>
+  <div id="encPick" style="margin-bottom:14px"></div>
+  <div class="two" style="grid-template-columns:200px 1fr;align-items:start">
+    <div><div class="imgbox"><img id="encIn" alt="input slice"></div><div class="lab">input slice (128×128×1)</div></div>
+    <div class="lg"><div class="rows"><span>stage 1 · 64×64×32</span><span>stage 2 · 32×32×64</span><span>stage 3 · 16×16×128</span><span>stage 4 · 8×8×256</span><span>stage 5 · 4×4×512</span></div><img id="encImg" alt="encoder feature maps"></div>
+  </div>
+  <figcaption><b>Figure 2.1.</b> Bright = strong response; each map is scaled on its own. Stage 1 maps still look like the slice: some light up the skull, some the dark ventricles, some edges at a certain angle. By stage 3 they are coarse blobs. At stage 5 each map is only 4×4: it no longer says <i>what the brain looks like</i>, only <i>roughly where</i> some learned pattern is. That is the information the bottleneck gets to work with.</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="bottleneck"><span class="k">3.</span>The bottleneck: 8,192 numbers become z</h2>
+<p>The 4×4×512 block is flattened into a vector of 8,192 numbers and one fully connected (Linear) layer maps it to the latent code:</p>
+<div class="math">$$ z = W_{\text{lat}}\,\text{flatten}(h_5) + b, \qquad W_{\text{lat}} \in \mathbb{R}^{d \times 8192} $$<div class="c">d is the latent dimension: 2, 3, 4, 8, 16, 64 or 128 in my experiments</div></div>
+<p>This one layer is the only thing that changes when I change the latent size. Everything else in the network is identical for every model on this site, which is what makes the comparisons fair. (It is also why the parameter count barely moves: 11.8 M for d = 2, 13.9 M for d = 128.)</p>
+
+<h2 id="decoder"><span class="k">4.</span>The decoder: growing the image back</h2>
+<p>The decoder starts with a Linear layer that turns z back into a 4×4×512 block, and then five stages each <b>double</b> the size. Each stage is a nearest-neighbour upsample (every pixel becomes a 2×2 square) followed by two 3×3 convolutions. The last layer is a 3×3 convolution down to 1 channel and a <b>sigmoid</b>, which squashes every pixel into the range 0 to 1, just like our images.</p>
+<div class="q"><span class="h">Why not transposed convolutions?</span>The textbook way to upsample is a "transposed convolution". But when its kernel size isn't divisible by its stride, some output pixels receive more contributions than their neighbours, and you get a faint <b>checkerboard pattern</b> all over the image (Odena et al., 2016). Upsample-then-convolve avoids that by construction, so I used it.</div>
+</div>
+
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Decoder feature maps: from 16 numbers back to a brain</h4><span class="badge recon">actual run · reconstruction</span></div>
+  <div id="decPick" style="margin-bottom:14px"></div>
+  <div class="two" style="grid-template-columns:1fr 200px;align-items:start">
+    <div class="lg"><div class="rows"><span>stage 1 · 8×8×512</span><span>stage 2 · 16×16×256</span><span>stage 3 · 32×32×128</span><span>stage 4 · 64×64×64</span><span>stage 5 · 128×128×32</span></div><img id="decImg" alt="decoder feature maps"></div>
+    <div><div class="imgbox"><img id="decOut" alt="output"></div><div class="lab">output x̂ (after the final conv + sigmoid)</div></div>
+  </div>
+  <figcaption><b>Figure 2.2.</b> The same "8 strongest channels" view on the way up. Coarse blobs turn back into a head outline, a skull ring and ventricles. Compare stage 5 here with stage 1 of the encoder: the structure is back, the fine texture is not. The decoder can only draw what the 16 numbers told it.</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="code"><span class="k">5.</span>Implementation</h2>
+<pre><code class="language-python">def conv_block(c_in, c_out, stride=1):
+    return nn.Sequential(nn.Conv2d(c_in, c_out, 3, stride=stride, padding=1, bias=False),
+                         nn.GroupNorm(8, c_out), nn.SiLU())
+
+class Encoder(nn.Module):                         # 128x128x1 -> d
+    def __init__(self, d, chans=(32, 64, 128, 256, 512)):
+        super().__init__()
+        layers, prev = [conv_block(1, chans[0])], chans[0]
+        for c in chans:                           # each stage halves H and W
+            layers += [conv_block(prev, c, stride=2), conv_block(c, c)]
+            prev = c
+        self.features = nn.Sequential(*layers)    # -> 4x4x512
+        self.to_latent = nn.Linear(512 * 4 * 4, d)
+
+    def forward(self, x):
+        return self.to_latent(self.features(x).flatten(1))
+
+class Decoder(nn.Module):                         # d -> 128x128x1
+    def __init__(self, d, chans=(512, 256, 128, 64, 32)):
+        super().__init__()
+        self.from_latent = nn.Linear(d, 512 * 4 * 4)
+        layers, prev = [], chans[0]
+        for c in chans:                           # each stage doubles H and W
+            layers += [nn.Upsample(scale_factor=2, mode="nearest"), conv_block(prev, c), conv_block(c, c)]
+            prev = c
+        layers.append(nn.Conv2d(prev, 1, 3, padding=1))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, z):
+        h = self.from_latent(z).view(-1, 512, 4, 4)
+        return torch.sigmoid(self.net(h))         # pixels in [0, 1]</code></pre>
+
+<h2 id="training"><span class="k">6.</span>Training, and my first mistake</h2>
+<p>Every model on this site uses the same recipe:</p>
+<table class="t">
+  <tr><th>setting</th><th>value</th><th>why</th></tr>
+  <tr><td>loss</td><td class="num">MSE per pixel</td><td>chapter 1</td></tr>
+  <tr><td>optimiser</td><td class="num">AdamW, lr 2×10⁻⁴</td><td>adaptive step size per weight</td></tr>
+  <tr><td>weight decay</td><td class="num">10⁻⁴</td><td>keeps weights small (raised from 10⁻⁵, see below)</td></tr>
+  <tr><td>schedule</td><td class="num">cosine, batch 64</td><td>large steps early, small steps late</td></tr>
+  <tr><td>stability</td><td class="num">grad clip 1.0, mixed precision</td><td>no exploding gradients, faster on GPU</td></tr>
+  <tr><td>stopping</td><td class="num">early stopping, patience 15</td><td>stop when validation stops improving</td></tr>
+  <tr><td>hardware</td><td class="num">1 × L40S / H100</td><td>~17 s per epoch on IXI</td></tr>
+</table>
+<p>My first run didn't have augmentation or early stopping: it trained every model for 100 epochs and kept the checkpoint with the best validation loss. It looked fine, until I plotted the curves.</p>
+</div>
+
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>First run vs fixed run (AE, z = 16)</h4><span class="badge diag">actual training logs</span></div>
+  <div class="ctl"><span class="l">show</span><div class="seg" id="histSeg"><button data-v="loss" class="on">loss</button><button data-v="psnr">validation PSNR</button></div></div>
+  <div id="histChart" class="chart"></div>
+  <figcaption><b>Figure 2.3.</b> First run (red): validation loss is lowest at <b>epoch 6</b> (0.00434) and then climbs to 0.00552 by epoch 100, while training loss keeps falling to 0.00107. The model memorised the 407 training brains. Fixed run (blue): with augmentation, stronger weight decay and early stopping, validation keeps improving until epoch 21 and reaches 0.00398, lower than the first run ever got.</figcaption>
+</div>
+<div class="fig">
+  <div class="fig-h"><h4>The fix: never show the model exactly the same pixels twice</h4><span class="badge real">actual pipeline</span></div>
+  <div class="lg"><div></div><div class="cols" style="grid-template-columns:repeat(9,1fr)"><span>original</span><span>view 1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><div class="rows"></div><img src="../assets/augment.png" alt="augmented views"></div>
+  <figcaption><b>Figure 2.4.</b> Eight random training views of one slice: left–right flip, up to ±10° rotation, ±5% zoom and shift, and a small brightness (gamma) change. They are applied on the GPU, to training batches only, and identically for every model.</figcaption>
+</div></div>
+
+<div class="article">
+<p>So the fix was three small changes: <b>augmentation</b>, <b>weight decay</b> 10× stronger, and <b>early stopping</b>. I tested it on one model first (a pilot), saw the validation curve keep improving past epoch 20, and only then re-ran all the models.</p>
+<div class="note">An honest side effect: the tiniest brain models (2–3 latent numbers) got about 0.5–0.8 dB <i>worse</i> with augmentation. With only 2 numbers, spending capacity on "how rotated is this slice" hurts. The bigger models all improved (e.g. z = 128: 25.9 → 27.1 dB).</div>
+<div class="warn"><b>Limitations.</b> One training seed per model, so differences below ~0.2 dB are within noise. The architecture is deliberately simple and identical across all models; a bigger decoder or skip connections would reconstruct more detail but would also defeat the point of a bottleneck.</div>
+<div class="key"><h4>Key takeaways</h4><ul>
+  <li>Encoder: 5 stride-2 stages trade space for channels (128×128×1 → 4×4×512), then one Linear layer makes z.</li>
+  <li>Decoder: the mirror image with nearest-neighbour upsampling, ending in a sigmoid.</li>
+  <li>Only the bottleneck layer changes between latent sizes, so the comparisons are fair.</li>
+  <li>Always plot validation curves: my first run peaked at epoch 6 and silently overfit for 94 more.</li>
+</ul></div>
+<h3>References</h3>
+<ol class="refs">
+  <li>Odena, Dumoulin, Olah (2016). Deconvolution and Checkerboard Artifacts. <i>Distill</i>.</li>
+  <li>Wu, He (2018). Group Normalization. ECCV.</li>
+  <li>Elfwing, Uchibe, Doya (2018). Sigmoid-weighted linear units (SiLU). <i>Neural Networks</i>.</li>
+  <li>Loshchilov, Hutter (2019). Decoupled Weight Decay Regularization (AdamW). ICLR.</li>
+</ol>
+<div class="pager"></div>
+</div>
+</main></div>
+<script src="../assets/site.js"></script>
+<script>
+// tensor-shape diagram (drawn proportionally: height ~ spatial size, depth ~ channels)
+(function () {
+  const S = [["input", 128, 1], ["stage 1", 64, 32], ["stage 2", 32, 64], ["stage 3", 16, 128], ["stage 4", 8, 256], ["stage 5", 4, 512]];
+  const D2 = [["stage 1", 8, 512], ["stage 2", 16, 256], ["stage 3", 32, 128], ["stage 4", 64, 64], ["stage 5", 128, 32], ["output", 128, 1]];
+  const H = s => 30 + Math.log2(s) * 22, Wd = c => 6 + Math.log2(c + 1) * 4.2;
+  let x = 34, svg = "";
+  const box = (lbl, s, c, col, step) => {
+    const h = H(s), w = Wd(c), y = 150 - h / 2;
+    svg += `<g data-step="${step}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="${col}" stroke="#94a3b8" stroke-width=".8"/>
+      <path d="M${x} ${y} l7 -7 h${w} l-7 7 z" fill="${col}" opacity=".7" stroke="#94a3b8" stroke-width=".6"/>
+      <path d="M${x + w} ${y} l7 -7 v${h} l-7 7 z" fill="${col}" opacity=".5" stroke="#94a3b8" stroke-width=".6"/>
+      <text x="${x + w / 2}" y="${150 + h / 2 + 18}" text-anchor="middle" class="sm">${s}×${s}</text><text x="${x + w / 2}" y="${150 + h / 2 + 31}" text-anchor="middle" class="sm">×${c}</text>
+      <text x="${x + w / 2}" y="${150 - h / 2 - 14}" text-anchor="middle" class="sm">${lbl}</text></g>`;
+    x += w + 30;
+  };
+  S.forEach((s, i) => box(s[0], s[1], s[2], i === 0 ? "#e2e8f0" : "#dbeafe", i === 0 ? 1 : 2));
+  svg += `<g data-step="3"><text x="${x + 18}" y="132" text-anchor="middle" class="sm">flatten</text><text x="${x + 18}" y="146" text-anchor="middle" class="mono">8,192</text>
+     <path d="M${x - 8} 150 h44" stroke="#64748b" stroke-width="1.6"/>`;
+  x += 50;
+  for (let j = 0; j < 16; j++) svg += `<rect x="${x}" y="${86 + j * 8}" width="18" height="6.5" rx="1.5" fill="${["#c2410c", "#fdba74", "#93c5fd", "#1d4ed8", "#f8fafc"][j % 5]}" stroke="#cbd5e1" stroke-width=".5"/>`;
+  svg += `<text x="${x + 9}" y="70" text-anchor="middle" class="ttl">z</text><text x="${x + 9}" y="232" text-anchor="middle" class="sm">16 numbers</text></g>`;
+  x += 40;
+  D2.forEach((s, i) => box(s[0], s[1], s[2], i === 5 ? "#e2e8f0" : "#ffedd5", 4));
+  svg += `<g data-step="2"><text x="210" y="308" text-anchor="middle" class="ttl">encoder</text></g><g data-step="4"><text x="${x - 230}" y="308" text-anchor="middle" class="ttl" fill="#c2410c">decoder</text></g>`;
+  $("#shapeSvg").setAttribute("viewBox", `0 0 ${x + 20} 320`);
+  $("#shapeSvg").innerHTML = svg;
+  stepper($("#shapeFig"), [
+    "The input: one grayscale slice, 128 × 128 pixels and 1 channel (brightness).",
+    "The <b>encoder</b>: five stages. Each halves the height and width and doubles the channels, 128×128×1 → 4×4×512. Blocks get shorter (less space) and thicker (more channels).",
+    "The <b>bottleneck</b>: the 4×4×512 block (8,192 numbers) is flattened and one Linear layer squeezes it into the latent code z, here 16 numbers.",
+    "The <b>decoder</b>: the mirror image. A Linear layer turns z back into 4×4×512, then five stages double the size back up to a 128×128×1 image."]);
+})();
+data().then(({D}) => {
+  picker($("#encPick"), D, k => { $("#encIn").src = A(`pick_${k}.png`); $("#encImg").src = A(`enc_${k}.png`); });
+  picker($("#decPick"), D, k => { $("#decImg").src = A(`dec_${k}.png`); $("#decOut").src = A(`rec16_${k}.png`); });
+  const getH = seg($("#histSeg"), () => drawH());
+  function drawH() {
+    const a = D.history.v1_ae16, b = D.history.v2_ae16, m = getH();
+    const tr = m === "loss" ? [
+      {x: a.epoch, y: a.train_loss, name: "first run · train", line: {color: "#dc2626", dash: "dot", width: 2}},
+      {x: a.epoch, y: a.val_loss, name: "first run · validation", line: {color: "#dc2626", width: 2.6}},
+      {x: b.epoch, y: b.train_loss, name: "fixed run · train", line: {color: "#1e40af", dash: "dot", width: 2}},
+      {x: b.epoch, y: b.val_loss, name: "fixed run · validation", line: {color: "#1e40af", width: 2.6}}]
+      : [{x: a.epoch, y: a.val_psnr, name: "first run", line: {color: "#dc2626", width: 2.6}}, {x: b.epoch, y: b.val_psnr, name: "fixed run", line: {color: "#1e40af", width: 2.6}}];
+    tr.forEach(t => t.mode = "lines");
+    Plotly.react("histChart", tr, lay({xaxis: {title: "epoch", gridcolor: "#eef2f7"}, yaxis: m === "loss" ? {title: "MSE per pixel", type: "log", gridcolor: "#eef2f7"} : {title: "validation PSNR (dB)", gridcolor: "#eef2f7"}}), PCFG);
+  }
+  drawH();
+});
+</script>
+</body></html>

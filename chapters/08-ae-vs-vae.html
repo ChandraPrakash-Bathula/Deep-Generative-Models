@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>8 · Autoencoder vs VAE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body data-base="../">
+<div class="layout"><main>
+<div class="article">
+<header class="chhead">
+  <div class="eyebrow">Chapter 8 · Comparison</div>
+  <h1>Autoencoder vs VAE</h1>
+  <p class="sub">We've built both models and looked at them from every angle. Now let's put them side by side on everything we measured: reconstruction, latent space, generation and interpolation, and say plainly what I take away.</p>
+  <div class="meta">Reading time ~10 min</div>
+</header>
+
+<h2 id="table"><span class="k">1.</span>The two models in one table</h2>
+<table class="t">
+  <tr><th></th><th>Autoencoder</th><th>Variational Autoencoder</th></tr>
+  <tr><td><b>encoding</b></td><td>deterministic: \(z = f_\theta(x)\)</td><td>a distribution: \(q_\phi(z\mid x)=\mathcal N(\mu, \sigma^2)\)</td></tr>
+  <tr><td><b>latent space</b></td><td>unregularised: any shape, gaps</td><td>pulled toward the prior N(0, I)</td></tr>
+  <tr><td><b>loss</b></td><td>reconstruction</td><td>reconstruction + β · KL</td></tr>
+  <tr><td><b>reconstruction</b></td><td>yes (slightly sharper at large d)</td><td>yes</td></tr>
+  <tr><td><b>sampling</b></td><td>not reliable from N(0, I); needs a fitted Gaussian</td><td>designed for it: sample N(0, I)</td></tr>
+  <tr><td><b>extra knob</b></td><td>none</td><td>β (sharp ↔ tidy)</td></tr>
+  <tr><td><b>cost</b></td><td colspan="2">same network and speed; the VAE adds one Linear head (12–15 M parameters either way)</td></tr>
+</table>
+
+<h2 id="recon"><span class="k">2.</span>Reconstruction</h2>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Test PSNR, both datasets</h4><span class="badge recon">reconstructed</span></div>
+  <div id="recChart" class="chart"></div>
+  <figcaption><b>Figure 8.1.</b> Left: brains; right: faces. Up to 16 latent numbers AE and VAE β=0.1 are tied. Beyond that the AE is sharper (+0.8 dB on brains, +0.7 dB on faces at d = 128), and VAE β=1 hits a ceiling on both datasets.</figcaption>
+</div></div>
+
+<div class="article"><h2 id="latent"><span class="k">3.</span>Latent space</h2></div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>The same 2-number latent plane, three models (IXI)</h4><span class="badge gen">background: decoded grid</span></div>
+  <div class="three">
+    <div><canvas id="pa" width="600" height="600" style="width:100%;aspect-ratio:1;border-radius:10px;background:#000"></canvas><div class="lab" style="color:var(--ae)">AE</div></div>
+    <div><canvas id="pb" width="600" height="600" style="width:100%;aspect-ratio:1;border-radius:10px;background:#000"></canvas><div class="lab" style="color:var(--v01)">VAE β=0.1</div></div>
+    <div><canvas id="pc" width="600" height="600" style="width:100%;aspect-ratio:1;border-radius:10px;background:#000"></canvas><div class="lab" style="color:var(--v1)">VAE β=1</div></div>
+  </div>
+  <figcaption><b>Figure 8.2.</b> Each panel: real test codes (dots, coloured by slice height) on top of what the decoder draws everywhere. All three learn the same anatomy-ordered layout. The AE spreads it over irregular arms, the VAEs pack it into a rounder region. The β=1 map is the smoothest and also the blurriest. Explore them with the mouse in chapter 3.</figcaption>
+</div></div>
+
+<div class="article"><h2 id="gen"><span class="k">4.</span>Generation and interpolation</h2></div>
+<div class="wide"><div class="two">
+  <div class="fig"><div class="fig-h"><h4>FID of samples (IXI)</h4><span class="badge gen">generated</span></div><div id="fidA" class="chart sm"></div></div>
+  <div class="fig"><div class="fig-h"><h4>FID of samples (CelebA)</h4><span class="badge gen">generated</span></div><div id="fidB" class="chart sm"></div></div>
+</div>
+<p class="cap" style="max-width:760px;margin:0 auto 10px"><b>Figure 8.3.</b> Lower is better; dotted = real vs real. With a fitted Gaussian, the AE generates as well as the VAE, and better on brains at large d.</p>
+<div class="fig">
+  <div class="fig-h"><h4>Interpolation, faces (d = 128)</h4><span class="badge gen">generated faces only</span></div>
+  <div class="lg"><div></div><div></div><div class="rows"><span style="color:var(--ae)">AE</span><span style="color:var(--v01)">VAE β=0.1</span><span style="color:var(--v1)">VAE β=1</span></div><img src="../assets/interp_celeba_128.png" alt="interpolation faces"></div>
+  <figcaption><b>Figure 8.4.</b> AE and VAE β=0.1 interpolate smoothly; β=1 washes out in the middle (chapter 7 explains why).</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="results"><span class="k">5.</span>Results at a glance</h2>
+</div>
+<div class="wide"><div class="tiles">
+  <div class="tile"><div class="v">27.1<small>dB</small></div><div class="k">best brain reconstruction: AE, d = 128 (from 20.3 dB at d = 2)</div></div>
+  <div class="tile"><div class="v">23.6<small>dB</small></div><div class="k">best face reconstruction: AE, d = 128 (from 15.2 dB at d = 2)</div></div>
+  <div class="tile"><div class="v">21<small>/ 128</small></div><div class="k">latent numbers VAE β=1 actually uses on brains</div></div>
+  <div class="tile"><div class="v">121<small>vs 131</small></div><div class="k">FID of AE + Gaussian fit vs VAE β=0.1 samples (brains, d = 128)</div></div>
+  <div class="tile"><div class="v">6 → 21</div><div class="k">best epoch before vs after fixing overfitting (AE, d = 16)</div></div>
+  <div class="tile"><div class="v">39</div><div class="k">trained models: 2 datasets × 3 model types × 6–7 latent sizes</div></div>
+</div></div>
+
+<div class="article">
+<h2 id="takeaways"><span class="k">6.</span>What I take away</h2>
+<ol>
+  <li><b>More latent numbers, better reconstructions</b>, on both datasets, with diminishing returns. Brains flatten after about 16 numbers; faces keep improving to 128.</li>
+  <li><b>AE and VAE β=0.1 are tied up to about 16 numbers.</b> Beyond that the AE is a little sharper, because the KL term costs the VAE some precision.</li>
+  <li><b>β = 1 has a hard ceiling.</b> It switches off most latent numbers (21 of 128 used on brains), so extra dimensions are wasted.</li>
+  <li><b>The VAE's real win is the map, not the samples.</b> Its latent space is compact, centred and smooth, so you can sample and walk it directly. But on these datasets, an AE plus a fitted Gaussian generates just as well.</li>
+  <li><b>All of these images are blurry</b>, because every model uses a pixel-wise loss. That is the limitation the next parts of this series go after.</li>
+  <li><b>Plot your validation curves.</b> My first run overfit from epoch 6 and I almost didn't notice.</li>
+</ol>
+<div class="key"><h4>When to use which</h4><ul>
+  <li><b>Compression, denoising, anomaly detection, features</b>: an AE is simpler and reconstructs a bit better.</li>
+  <li><b>Sampling, smooth interpolation, a structured latent space to explore</b>: a VAE with a small β (around 0.1 here).</li>
+  <li><b>Sharp, realistic samples</b>: neither. That's what GANs and diffusion models are for.</li>
+</ul></div>
+
+<h2 id="next"><span class="k">7.</span>What comes next</h2>
+<p>Everything in this part was limited by one thing: the pixel-wise loss makes every image a blurry average. In the upcoming parts of this <b>Deep Generative Models</b> series we will go after exactly that, with the same datasets and the same honest numbers: <b>diffusion models</b> (learning to remove noise step by step), then <b>world models</b> and <b>JEPA</b> (predicting in latent space instead of pixel space).</p>
+<h3>Code, models and demo</h3>
+<ul>
+  <li>Autoencoder code and results: <a href="https://github.com/ChandraPrakash-Bathula/Auto-Encoders">github.com/ChandraPrakash-Bathula/Auto-Encoders</a></li>
+  <li>VAE code and results: <a href="https://github.com/ChandraPrakash-Bathula/Variational-AutoEncoders">github.com/ChandraPrakash-Bathula/Variational-AutoEncoders</a></li>
+  <li>Trained weights: <a href="https://huggingface.co/ChandraPrakashBathula/medlatent-autoencoder">AE on Hugging Face</a> · <a href="https://huggingface.co/ChandraPrakashBathula/medlatent-vae">VAE on Hugging Face</a></li>
+  <li>Live demo: <a href="https://huggingface.co/spaces/ChandraPrakashBathula/medlatent-studio">MedLatent Studio (Hugging Face Space)</a></li>
+</ul>
+<div class="warn">Research models only. Reconstructed and generated brain images are not diagnostic images and must not be used for any clinical decision.</div>
+<h3>References</h3>
+<ol class="refs">
+  <li>Hinton, Salakhutdinov (2006). Reducing the dimensionality of data with neural networks. <i>Science</i>.</li>
+  <li>Kingma, Welling (2013). Auto-Encoding Variational Bayes. arXiv:1312.6114.</li>
+  <li>Higgins et al. (2017). β-VAE. ICLR.</li>
+  <li>Ghosh et al. (2020). From Variational to Deterministic Autoencoders. ICLR.</li>
+  <li>van der Maaten, Hinton (2008). t-SNE. <i>JMLR</i> · McInnes et al. (2018). UMAP. arXiv:1802.03426.</li>
+</ol>
+<div class="pager"></div>
+</div>
+</main></div>
+<script src="../assets/site.js"></script>
+<script>
+data().then(({D}) => {
+  const tr = [];
+  ["ixi", "celeba"].forEach((ds, k) => Object.keys(MODELS).forEach(mk => {
+    const g = results(D, ds).filter(r => r.mk === mk).sort((a, b) => a.latent_dim - b.latent_dim);
+    tr.push({x: g.map(r => r.latent_dim), y: g.map(r => r.psnr_mean), name: MODELS[mk], legendgroup: mk, showlegend: k === 0, xaxis: k ? "x2" : "x", yaxis: k ? "y2" : "y", mode: "lines+markers", line: {color: MCOL[mk], width: 2.5}, marker: {size: 6}});
+  }));
+  const ax = logx(); Plotly.newPlot("recChart", tr, lay({grid: {rows: 1, columns: 2, pattern: "independent"}, xaxis: {...ax, title: "latent dimension · brains"}, xaxis2: {...ax, title: "latent dimension · faces"},
+    yaxis: {title: "PSNR (dB)", gridcolor: "#eef2f7"}, yaxis2: {gridcolor: "#eef2f7"}}), PCFG);
+  const fid = (el, ds) => { const rows = results(D, ds), t = [];
+    for (const mk of Object.keys(MODELS)) { const g = rows.filter(r => r.mk === mk).sort((a, b) => a.latent_dim - b.latent_dim);
+      t.push({x: g.map(r => r.latent_dim), y: g.map(r => mk === "ae" ? r.fid_gauss : r.fid_prior), name: mk === "ae" ? "AE (Gaussian fit)" : MODELS[mk], mode: "lines+markers", line: {color: MCOL[mk], width: 2.4}}); }
+    const f = rows.find(r => r.fid_real_floor != null).fid_real_floor; t.push({x: [2, 128], y: [f, f], name: "real vs real", mode: "lines", line: {color: "#94a3b8", dash: "dot"}});
+    Plotly.newPlot(el, t, lay({xaxis: logx(), yaxis: {title: "FID", type: "log", gridcolor: "#eef2f7"}, legend: {orientation: "h", y: 1.25, font: {size: 10.5}}}), PCFG); };
+  fid("fidA", "ixi"); fid("fidB", "celeba");
+  for (const [id, mk] of [["pa", "ae"], ["pb", "vae01"], ["pc", "vae1"]]) {
+    const c = $("#" + id), ctx = c.getContext("2d"), P = D.planes[`ixi_${mk}`];
+    const im = new Image(); im.onload = () => {
+      ctx.globalAlpha = .6; ctx.drawImage(im, 0, 0, c.width, c.height); ctx.globalAlpha = .9;
+      const sx = (P.hi[0] - P.lo[0]) / (P.n - 1), sy = (P.hi[1] - P.lo[1]) / (P.n - 1), x0 = P.lo[0] - sx / 2, x1 = P.hi[0] + sx / 2, y0 = P.lo[1] - sy / 2, y1 = P.hi[1] + sy / 2;
+      for (let i = 0; i < P.x.length; i++) { ctx.fillStyle = viridis((P.c[i] - .3) / .5); ctx.beginPath(); ctx.arc((P.x[i] - x0) / (x1 - x0) * c.width, (y1 - P.y[i]) / (y1 - y0) * c.height, 2.2, 0, 7); ctx.fill(); }
+    }; im.src = A(`plane_ixi_${mk}.jpg`);
+  }
+});
+</script>
+</body></html>

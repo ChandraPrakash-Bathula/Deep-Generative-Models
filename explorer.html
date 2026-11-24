@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Experiment Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<link rel="stylesheet" href="assets/site.css">
+<style>
+.dash{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:980px){.dash{grid-template-columns:1fr}}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px}
+.kv dt{color:var(--muted)} .kv dd{margin:0;font-family:var(--mono);font-size:13px;color:var(--ink);text-align:right}
+.runtitle{font-size:22px;font-weight:800;color:var(--navy);letter-spacing:-.01em;margin:0 0 4px}
+</style>
+</head>
+<body data-base="">
+<div class="layout"><main>
+<div class="wide">
+<header class="chhead">
+  <div class="eyebrow">Tool</div>
+  <h1>Experiment Explorer</h1>
+  <p class="sub">All 39 trained models in one place. Choose a dataset, a model and a latent size, then a projection and a view. Every plot, number and image is from the real runs.</p>
+</header>
+<div class="fig">
+  <div class="ctl">
+    <span class="l">dataset</span><div class="seg" id="xDs"><button data-v="ixi" class="on">IXI brain MRI</button><button data-v="celeba">CelebA faces</button></div>
+    <span class="l">model</span><div class="seg" id="xM"><button data-v="ae" class="on">Autoencoder</button><button data-v="vae01">VAE β=0.1</button><button data-v="vae1">VAE β=1</button></div>
+    <span class="l">latent size</span><div class="seg" id="xZ"></div>
+  </div>
+  <div class="ctl">
+    <span class="l">projection</span><div class="seg" id="xMe"><button data-v="pca">PCA</button><button data-v="tsne">t-SNE</button><button data-v="umap" class="on">UMAP</button></div>
+    <span class="l">visualization</span><div class="seg" id="xD"><button data-v="2" class="on">2D</button><button data-v="3">3D</button></div>
+    <span class="l">colour</span><div class="seg" id="xC"></div>
+  </div>
+</div>
+<div class="dash">
+  <div class="fig" style="margin-top:0">
+    <div class="fig-h"><h4 id="xTitle"></h4><span class="badge int">interactive</span></div>
+    <div id="xChart" class="chart lg"></div>
+    <p class="cap" id="xNote"></p>
+  </div>
+  <div>
+    <div class="fig" style="margin-top:0">
+      <div class="runtitle" id="rTitle"></div>
+      <div class="meta" id="rSub"></div>
+      <dl class="kv" id="rKv"></dl>
+      <p class="cap" id="rLinks"></p>
+    </div>
+    <div class="fig">
+      <div class="fig-h"><h4>Samples from this model</h4><span id="rBadges"></span></div>
+      <div class="lg"><div></div><div></div><div class="rows" id="rRows"></div><img id="rImg" alt="samples"></div>
+      <p class="cap" id="rCap"></p>
+    </div>
+  </div>
+</div>
+</div>
+</main></div>
+<script src="assets/site.js"></script>
+<script>
+data().then(({D}) => {
+  const ZS = {ixi: [2, 3, 4, 8, 16, 64, 128], celeba: [2, 4, 8, 16, 64, 128]};
+  const COL = {ixi: [["slice_pos", "slice height"], ["cluster", "k-means cluster"], ["mse", "recon error"]],
+               celeba: [["Male", "male"], ["Smiling", "smiling"], ["Eyeglasses", "glasses"], ["Blond_Hair", "blond"], ["cluster", "k-means cluster"]]};
+  const st = {ds: "ixi", mk: "ae", z: 16, method: "umap", dim: "2", colour: "slice_pos"};
+  const hasRun = (ds, mk, z) => results(D, ds).some(r => r.mk === mk && r.latent_dim === z);
+  function controls() {
+    const zs = ZS[st.ds].filter(z => hasRun(st.ds, st.mk, z));
+    if (!zs.includes(st.z)) st.z = zs.includes(16) ? 16 : zs[0];
+    setSeg($("#xZ"), zs, null, st.z);
+    if (!COL[st.ds].some(c => c[0] === st.colour)) st.colour = COL[st.ds][0][0];
+    setSeg($("#xC"), COL[st.ds].map(c => c[0]), COL[st.ds].map(c => c[1]), st.colour);
+  }
+  function render() {
+    const R = results(D, st.ds).find(r => r.mk === st.mk && r.latent_dim === st.z);
+    const dsName = st.ds === "ixi" ? "IXI" : "CelebA";
+    $("#xTitle").textContent = `${dsName} · ${MODELS[st.mk]} · ${st.method.toUpperCase()} · ${st.dim}D`;
+    if (D.explorer[`${st.ds}_${st.mk}_${st.z}`]) {
+      const name = scatter("xChart", D, {...st, pick: null}, {picks: false});
+      $("#xNote").innerHTML = name.startsWith("raw") ? `Latent size ${st.z} ≤ ${st.dim}: these are the real latent axes, no projection.` :
+        `The ${st.z}-number codes of 1,200 test images, projected to ${st.dim}-D with ${st.method.toUpperCase()}. ` + ({umap: "UMAP keeps neighbours and some global layout.", tsne: "t-SNE keeps neighbours; gaps and cluster sizes are not meaningful.", pca: "PCA is a linear shadow: honest distances, flattened curves."})[st.method];
+    } else {
+      Plotly.purge("xChart"); $("#xChart").innerHTML = `<p class="cap" style="padding:40px">Latent plots for this latent size aren't in the explorer set (available: d = ${st.ds === "ixi" ? "2, 3, 8, 16, 64, 128" : "2, 16, 64, 128"}). Its metrics and samples are on the right.</p>`; $("#xNote").textContent = "";
+    }
+    $("#rTitle").textContent = `${MODELS[st.mk]}, d = ${st.z}`;
+    $("#rSub").textContent = `${dsName} · ${st.ds === "ixi" ? "128×128 grayscale T1 slices" : "64×64 RGB faces"} · ${(R.n_params / 1e6).toFixed(2)} M parameters · best epoch ${R.epoch}`;
+    const f = (v, d = 2) => v == null ? "–" : (+v).toFixed(d);
+    const rows = [["test MSE", f(R.mse_mean, 5)], ["PSNR", `${f(R.psnr_mean)} dB`], [st.ds === "ixi" ? "brain-only PSNR" : "foreground PSNR", `${f(R.masked_psnr_mean)} dB`], ["SSIM", f(R.ssim_mean, 3)],
+      ["FID of reconstructions", f(R.fid_recon, 1)], [st.mk === "ae" ? "FID of samples (Gaussian fit)" : "FID of samples (prior)", f(st.mk === "ae" ? R.fid_gauss : R.fid_prior, 1)],
+      ["FID real vs real", f(R.fid_real_floor, 1)]];
+    if (st.mk !== "ae") rows.push(["KL per image", `${f(R.kl_mean_nats, 1)} nats`], ["active latent units", `${R.active_units} / ${st.z}`], ["β", R.beta]);
+    $("#rKv").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+    const repo = st.mk === "ae" ? "medlatent-autoencoder" : "medlatent-vae", run = st.mk === "ae" ? `z${st.z}` : `z${st.z}_beta${st.mk === "vae1" ? 1 : 0.1}`;
+    $("#rLinks").innerHTML = `Weights, config and all figures: <a href="https://huggingface.co/ChandraPrakashBathula/${repo}/tree/main/${st.ds}/${run}">huggingface.co/…/${repo}/${st.ds}/${run}</a>`;
+    $("#rImg").src = A(`runs/${st.ds}_${st.mk}_${st.z}.jpg`);
+    if (st.ds === "ixi") {
+      $("#rRows").innerHTML = "<span>real</span><span>reconstructed</span><span>generated</span>";
+      $("#rBadges").innerHTML = `<span class="badge real">real</span> <span class="badge recon">reconstructed</span> <span class="badge gen">generated</span>`;
+      $("#rCap").textContent = `The same 6 real test slices for every model, their reconstructions, and 6 new samples (${st.mk === "ae" ? "from a Gaussian fitted to the training codes" : "from the prior N(0, I)"}).`;
+    } else {
+      $("#rRows").innerHTML = "<span>generated</span><span>generated</span>";
+      $("#rBadges").innerHTML = `<span class="badge gen">generated</span>`;
+      $("#rCap").textContent = `12 new faces (${st.mk === "ae" ? "Gaussian fit" : "prior N(0, I)"}). Real CelebA faces and their reconstructions are not shown because of the dataset licence.`;
+    }
+  }
+  for (const [id, key] of [["#xDs", "ds"], ["#xM", "mk"], ["#xZ", "z"], ["#xMe", "method"], ["#xD", "dim"], ["#xC", "colour"]]) seg($(id), v => { st[key] = key === "z" ? +v : v; controls(); render(); });
+  controls(); render();
+});
+</script>
+</body></html>

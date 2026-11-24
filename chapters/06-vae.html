@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>6 · Variational Autoencoders</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body data-base="../">
+<div class="layout"><main>
+<div class="article">
+<header class="chhead">
+  <div class="eyebrow">Chapter 6 · The centrepiece</div>
+  <h1>Variational Autoencoders</h1>
+  <p class="sub">An autoencoder can copy images, but it can't make new ones. The Variational Autoencoder fixes that with one idea: describe every image not as a point, but as a small cloud. Let's build it up in nine steps.</p>
+  <div class="meta">Reading time ~20 min</div>
+</header>
+<div class="goals"><h4>By the end of this chapter you will know</h4><ul>
+  <li>why a plain autoencoder struggles to generate, and what "gaps in the latent space" means;</li>
+  <li>what the mean μ and spread σ are, why we sample with ε, and what the reparameterisation trick does;</li>
+  <li>what the KL divergence does to the latent space, how β controls it, and how to generate brand-new images.</li>
+</ul></div>
+
+<h2 id="s1" data-short="1 · Why AEs struggle to generate"><span class="k">1.</span>Why ordinary autoencoders struggle to generate</h2>
+<p>Here is the natural next thought after chapter 3: if the decoder turns 16 numbers into a brain, why not just pick 16 random numbers and get a <b>new</b> brain? Let's try it on the trained AE.</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Feeding random numbers to the decoders (d = 16, same noise in every row)</h4><span class="badge gen">generated</span></div>
+  <div class="lg"><div></div><div></div><div class="rows"><span>AE + random N(0, I)</span><span>AE + Gaussian fit</span><span style="color:var(--v01)">VAE β=0.1 + N(0, I)</span><span style="color:var(--v1)">VAE β=1 + N(0, I)</span></div><img src="../assets/gen_ixi_z16.png" alt="random codes decoded"></div>
+  <figcaption><b>Figure 6.1.</b> Row 1: the AE decodes standard random numbers into broken, smeared or distorted heads. Row 2: the same AE, but the random numbers are first stretched to match where its training codes actually live (a Gaussian fitted to them); now they look like brains. Rows 3–4: the VAE decodes plain random numbers into reasonable brains straight away, because it was <i>trained</i> to keep its codes in that region.</figcaption>
+</div></div>
+<div class="article">
+<p>So the decoder is fine. The problem is <b>where the random numbers land</b>. The usual random numbers come from a standard bell curve, N(0, 1): mostly between −2 and +2. But nobody told the AE to put its codes there. On our z = 16 AE, the codes have an average size of <b>2.7</b> and a spread between <b>4.6 and 8.6</b> per number. Most random draws simply land in places the decoder has never seen.</p>
+
+<h2 id="s2" data-short="2 · Gaps in the latent space"><span class="k">2.</span>Deterministic codes leave irregular gaps</h2>
+<p>A plain autoencoder maps each image to exactly <b>one point</b>. The loss only cares that each point can be decoded back into its own image. It says nothing about the space <i>between</i> points, so the model is free to scatter its codes in odd shapes, with empty regions in between. The left plot shows the real codes of the 2-number AE and VAE (dots only): the AE has long arms and gaps, the VAE a compact blob.</p>
+</div>
+<div class="wide"><div class="two">
+  <div class="fig"><div class="fig-h"><h4>AE, d = 2: one point per image</h4><span class="badge real">test codes</span></div><div id="ptsAE" class="chart sm"></div></div>
+  <div class="fig"><div class="fig-h"><h4>VAE β=0.1, d = 2: means μ of the clouds</h4><span class="badge real">test codes</span></div><div id="ptsVAE" class="chart sm"></div></div>
+</div>
+<p class="cap" style="max-width:760px;margin:0 auto"><b>Figure 6.2.</b> 1,500 real test slices, coloured by height in the head. Note the axis ranges: the AE's codes spread over tens of units in strange shapes; the VAE's means sit in a round region of a few units around 0, close to where N(0, I) puts its samples. A random point in the AE's box often falls in a gap; in the VAE's box it almost always lands near real data.</p></div>
+
+<div class="article">
+<h2 id="s3" data-short="3 · Why probability distributions"><span class="k">3.</span>So we introduce probability distributions</h2>
+<p>The VAE's fix is to change what the encoder says. Instead of "this image is at point z", it says "this image is <b>somewhere around μ</b>, give or take <b>σ</b>". In other words, every image becomes a small Gaussian cloud in latent space:</p>
+<div class="math">$$ \text{AE:}\;\; z = f_\theta(x) \qquad\qquad \text{VAE:}\;\; q_\phi(z\mid x) = \mathcal{N}\big(\mu_\phi(x),\, \operatorname{diag}\sigma_\phi^2(x)\big) $$<div class="c">q(z | x) is the encoder's belief about where the code of image x is</div></div>
+<p>Why does this help? Because the decoder will be trained on random points <i>from the cloud</i>, not on the exact centre. So the decoder has to produce a sensible image for a whole region around each μ. Neighbouring regions overlap, and the space between images gets filled with meaningful codes. Intuitively, we're forcing the latent space to be smooth.</p>
+
+<h2 id="s4" data-short="4 · Mean and variance"><span class="k">4.</span>What μ and σ represent</h2>
+<p>Architecturally the change is tiny: the encoder's last Linear layer is replaced by <b>two</b> Linear layers, one giving μ (where the cloud is) and one giving log σ² (how big it is). We predict log σ² instead of σ so the network can output any real number and σ stays positive.</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>One slice, as the VAE describes it (β = 0.1, d = 16)</h4><span class="badge real">actual run</span></div>
+  <div id="muPick" style="margin-bottom:12px"></div>
+  <div class="two" style="grid-template-columns:160px 1fr;align-items:center">
+    <div><div class="imgbox"><img id="muIn" alt="slice"></div><div class="lab"><span class="badge real">real</span> input</div></div>
+    <div><div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:4px">μ: where the cloud is</div><div id="muVec"></div>
+      <div class="sub" style="font-size:12px;color:var(--muted);margin:10px 0 4px">σ: how big the cloud is</div><div id="sgVec"></div>
+      <div class="vec-legend"><span>μ: negative</span><span class="bar"></span><span>positive · σ cells: darker = bigger</span></div></div>
+  </div>
+  <figcaption><b>Figure 6.3.</b> The actual μ and σ the trained VAE produces for this slice. The means vary between about −3 and +3. The spreads are tiny, about 0.01–0.08 (median over the test set: 0.036). With β = 0.1 the clouds are small: the VAE behaves almost like an AE, but with a much tidier map.</figcaption>
+</div>
+<div class="fig">
+  <div class="fig-h"><h4>The clouds and the prior, along one latent dimension</h4><span class="badge real">actual run · 2-number VAEs</span></div>
+  <div class="ctl"><span class="l">β</span><div class="seg" id="gSeg"><button data-v="vae01" class="on">0.1</button><button data-v="vae1">1</button></div><span class="l">dimension</span><div class="seg" id="gDim"><button data-v="0" class="on">z₁</button><button data-v="1">z₂</button></div></div>
+  <div id="gChart" class="chart"></div>
+  <figcaption><b>Figure 6.4.</b> Each coloured curve is the cloud \(q(z\mid x)\) of one of the 8 example slices along one latent number (its μ and σ from the 2-number VAE); the grey curve is the prior N(0, 1). The clouds are narrow spikes, but together they spread across the whole prior: the KL term decided <i>where</i> the clouds sit (all inside N(0, 1)). With only 2 numbers, even β = 1 keeps the clouds narrow (σ ≈ 0.01–0.07), because each number carries so much information that paying the KL cost is worth it. Wider clouds appear in the bigger β = 1 models (median σ ≈ 0.22 at d = 16, Figure 6.7).</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="s5" data-short="5 · Sampling with ε"><span class="k">5.</span>Sampling a code from the cloud</h2>
+<p>During training, we don't decode μ. We decode a random point from the cloud. Step through the picture: this is exactly what happens for every image in every training step.</p>
+</div>
+<div class="wide"><div class="fig" id="vaeFig">
+  <div class="fig-h"><h4>The VAE forward pass, step by step</h4><span class="badge int">interactive · actual numbers</span></div>
+  <div class="steps"></div>
+  <svg class="dia" viewBox="0 0 1000 440" id="vaeSvg">
+    <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>
+    <g data-step="1"><rect x="8" y="148" width="148" height="148" rx="9" fill="#000"/><image id="vIn" x="10" y="150" width="144" height="144"/><text x="82" y="134" text-anchor="middle" class="ttl">image x</text>
+      <path d="M160 222 L178 222" stroke="#64748b" stroke-width="2" marker-end="url(#ah2)"/>
+      <polygon points="182,154 282,192 282,252 182,290" fill="#dbeafe" stroke="#93c5fd"/><text x="232" y="227" text-anchor="middle" class="ttl">ENCODER</text>
+      <path d="M284 204 L376 146" stroke="#64748b" stroke-width="1.8" marker-end="url(#ah2)"/><path d="M284 240 L376 306" stroke="#64748b" stroke-width="1.8" marker-end="url(#ah2)"/>
+      <g id="vMu"></g><text x="420" y="58" text-anchor="middle" class="ttl">μ (mean)</text>
+      <g id="vSg"></g><text x="420" y="424" text-anchor="middle" class="ttl">σ (spread)</text></g>
+    <g data-step="2"><g id="vEps"></g><text x="590" y="424" text-anchor="middle" class="ttl" style="fill:#7c3aed">ε ~ N(0, I)</text></g>
+    <g data-step="3"><text x="590" y="58" text-anchor="middle" class="ttl">z = μ + σ ⊙ ε</text><g id="vZ"></g>
+      <path d="M458 146 L552 146" stroke="#64748b" stroke-width="1.6" marker-end="url(#ah2)"/><path d="M458 306 L552 190" stroke="#64748b" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#ah2)"/>
+      <path d="M590 246 L590 228" stroke="#7c3aed" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#ah2)"/></g>
+    <g data-step="4"><path d="M628 146 L712 206" stroke="#64748b" stroke-width="2" marker-end="url(#ah2)"/>
+      <polygon points="716,192 816,154 816,290 716,252" fill="#ffedd5" stroke="#fdba74"/><text x="766" y="227" text-anchor="middle" class="ttl">DECODER</text>
+      <path d="M818 222 L838 222" stroke="#64748b" stroke-width="2" marker-end="url(#ah2)"/>
+      <rect x="842" y="148" width="148" height="148" rx="9" fill="#000"/><image id="vOut" x="844" y="150" width="144" height="144"/><text x="916" y="134" text-anchor="middle" class="ttl">x̂</text></g>
+  </svg>
+  <div class="stepnote"></div>
+  <div id="vPick" style="margin-top:8px"></div>
+</div></div>
+
+<div class="article">
+<h2 id="s6" data-short="6 · Reparameterisation trick"><span class="k">6.</span>The reparameterisation trick</h2>
+<div class="q"><span class="h">But wait, how do you backpropagate through "pick a random number"?</span>You can't. Sampling is not a differentiable operation: there is no gradient of "a random draw from N(μ, σ²)" with respect to μ. That's a real problem, because training needs gradients for μ and σ.</div>
+<p>The trick (Kingma and Welling, 2013) is to move the randomness <b>out of the way</b>. Instead of sampling z directly, sample a standard random vector ε that doesn't depend on anything, and then build z from it with plain arithmetic:</p>
+<div class="math">$$ z = \mu + \sigma \odot \epsilon, \qquad \epsilon \sim \mathcal{N}(0, I) $$
+$$ \frac{\partial z}{\partial \mu} = 1, \qquad \frac{\partial z}{\partial \sigma} = \epsilon $$<div class="c">ε is just an input, like a constant; z is now an ordinary differentiable function of μ and σ</div></div>
+<p>In simple words: "pick a random point in the cloud" becomes "start from a random point in a standard cloud, then stretch it by σ and shift it by μ". Same distribution, but now the gradients can flow into the encoder. That's step 3 in the diagram above.</p>
+
+<h2 id="s7" data-short="7 · KL divergence"><span class="k">7.</span>Why we need the KL divergence</h2>
+<p>Sampling alone is not enough. The encoder could cheat: make every σ tiny (so the cloud is a point again) and spread the μ's far apart. Then we're back to a plain AE with gaps. So we add a second term to the loss that pulls every cloud toward one shared bell curve, the <b>prior</b> \(p(z) = \mathcal{N}(0, I)\). It's measured with the Kullback–Leibler divergence, which for Gaussians has a closed form:</p>
+<div class="math">$$ D_{\mathrm{KL}}\big(q_\phi(z\mid x)\,\Vert\,p(z)\big) = \frac{1}{2}\sum_{j=1}^{d}\Big(\mu_j^2 + \sigma_j^2 - 1 - \log\sigma_j^2\Big) $$<div class="c">it is 0 only when μ = 0 and σ = 1, i.e. when the cloud is exactly the prior</div></div>
+<p>And the full VAE loss is the reconstruction error plus β times the KL term:</p>
+<div class="math">$$ \mathcal{L}_{\text{VAE}} = \underbrace{\frac{1}{D}\lVert x-\hat x\rVert^2}_{\text{reconstruct well}} \;+\; \beta\,\underbrace{\frac{1}{D}\,D_{\mathrm{KL}}\big(q_\phi(z\mid x)\,\Vert\,p(z)\big)}_{\text{stay close to the prior}} $$<div class="c">I divide the KL by the number of pixels D so both terms are on the same per-pixel scale; with β = 1 this is the negative ELBO of the original paper (Gaussian decoder)</div></div>
+<p>The two terms fight a tug-of-war. Reconstruction wants every cloud small and far from the others, so each image is easy to recognise. KL wants every cloud big and sitting on the centre, so the space has no holes. What comes out is a compromise: a packed, smooth map that you can sample from.</p>
+<h3>β, the dial between sharp and tidy</h3>
+<p>β decides who wins. With small β (0.1) reconstruction wins most of the time. With β = 1 the KL term is much stronger, and it does something interesting: it <b>switches off</b> latent numbers. For a latent number to carry information, its clouds must move away from N(0, 1), which costs KL. If the reconstruction doesn't improve enough to pay that cost, the cheapest option is to give up on that number entirely: μ = 0 and σ = 1 for every image. Such numbers are called <b>inactive</b> (I count a number as active if its μ changes across images, Var[μ] > 0.01).</p>
+</div>
+<div class="wide"><div class="two">
+  <div class="fig"><div class="fig-h"><h4>Active latent units</h4><span class="badge diag">test set</span></div><div id="actChart" class="chart sm"></div>
+    <figcaption><b>Figure 6.5.</b> On brains, VAE β=1 uses only about <b>21–22</b> numbers whether it has 64 or 128. β=0.1 uses 62 of 64 and 89 of 128. Dotted line = all numbers used.</figcaption></div>
+  <div class="fig"><div class="fig-h"><h4>KL per latent number (d = 128)</h4><span class="badge diag">test set</span></div>
+    <div class="ctl"><div class="seg" id="klSeg"><button data-v="ixi" class="on">IXI</button><button data-v="celeba">CelebA</button></div></div>
+    <div id="klChart" class="chart sm" style="height:250px"></div>
+    <figcaption><b>Figure 6.6.</b> Average KL per latent number, sorted. Near 0 = switched off. β=1 puts the information into a few numbers and leaves a long tail of zeros.</figcaption></div>
+</div></div>
+<div class="article">
+<p>This partial "posterior collapse" is exactly why the β = 1 line flattens in chapter 3: beyond about 16–22 numbers, extra dimensions are just ignored, and reconstructions stop improving at about 24.9 dB on brains.</p>
+
+<h2 id="s8" data-short="8 · The prior shapes the space"><span class="k">8.</span>How the prior shapes the latent space</h2>
+<p>Let's check the effect directly. Below are the distributions of the three most-used latent numbers over all test slices, for the AE and for the two VAEs, against the prior N(0, 1).</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Latent values before and after the KL term (d = 16)</h4><span class="badge diag">5,514 test codes</span></div>
+  <div class="ctl"><span class="l">model</span><div class="seg" id="hSeg"><button data-v="ae" class="on">AE (no KL)</button><button data-v="vae01">VAE β=0.1</button><button data-v="vae1">VAE β=1</button></div></div>
+  <div id="hChart" class="chart"></div>
+  <figcaption id="hCap"><b>Figure 6.7.</b></figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="s9" data-short="9 · Generating new images"><span class="k">9.</span>Generating completely new images</h2>
+<p>And now the payoff. Because training kept every cloud close to N(0, I), generating a new image is just two lines:</p>
+<div class="arrow">ε ~ N(0, I) <span class="k">→ decoder →</span> a brand-new image (no encoder, no input image)</div>
+<p>Rows 3 and 4 of Figure 6.1 were made exactly like this, and chapter 7 is entirely about generated images: how realistic they are, how temperature changes them, and how to walk between two images.</p>
+
+<h3>Implementation</h3>
+<pre><code class="language-python">class VAE(nn.Module):
+    def encode(self, x):
+        h = self.features(x).flatten(1)
+        return self.fc_mu(h), self.fc_logvar(h).clamp(-10, 10)   # mu and log sigma^2
+
+    def forward(self, x):
+        mu, logvar = self.encode(x)
+        eps = torch.randn_like(mu)                                # epsilon ~ N(0, I)
+        z = mu + torch.exp(0.5 * logvar) * eps                    # reparameterisation trick
+        return self.decoder(z), mu, logvar
+
+def vae_loss(x_hat, x, mu, logvar, beta):
+    D = x[0].numel()                                              # pixels per image
+    recon = F.mse_loss(x_hat, x, reduction="none").flatten(1).mean(1)
+    kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum(1)    # closed-form KL to N(0, I)
+    return (recon + beta * kl / D).mean()
+
+# generation: no encoder at all
+samples = model.decoder(torch.randn(16, latent_dim))</code></pre>
+<p>Two practical details from my runs. The KL weight is ramped up linearly over the first 10 epochs (starting with a full KL weight lets it switch off numbers before they learn anything), and validation always uses the full β so checkpoints are comparable.</p>
+
+<div class="warn"><b>Limitations.</b> A VAE does not guarantee realistic images: on my data, VAE samples are still blurry (same pixel loss as the AE), and β = 1 switches off most latent numbers. The Gaussian prior is a simple choice; richer priors or decoders give better samples. The clouds at β = 0.1 are so small that the VAE behaves almost like a well-organised AE.</div>
+<div class="key"><h4>Key takeaways</h4><ul>
+  <li>AE: image → one point. VAE: image → a Gaussian cloud \(\mathcal N(\mu, \sigma^2)\).</li>
+  <li>Training decodes random points from the cloud; the reparameterisation trick \(z=\mu+\sigma\odot\epsilon\) makes that differentiable.</li>
+  <li>The KL term pulls every cloud toward N(0, I), which closes the gaps and makes sampling work.</li>
+  <li>β trades sharpness for tidiness; too much β switches latent numbers off (partial posterior collapse).</li>
+</ul></div>
+<h3>References</h3>
+<ol class="refs">
+  <li>Kingma, Welling (2013). Auto-Encoding Variational Bayes. arXiv:1312.6114.</li>
+  <li>Rezende, Mohamed, Wierstra (2014). Stochastic Backpropagation and Approximate Inference in Deep Generative Models. ICML.</li>
+  <li>Higgins et al. (2017). β-VAE: Learning Basic Visual Concepts with a Constrained Variational Framework. ICLR.</li>
+  <li>Burda, Grosse, Salakhutdinov (2016). Importance Weighted Autoencoders (active units). ICLR.</li>
+  <li>Bowman et al. (2016). Generating Sentences from a Continuous Space (KL annealing). CoNLL.</li>
+  <li>Kingma, Welling (2019). An Introduction to Variational Autoencoders. <i>Foundations and Trends in ML</i>.</li>
+</ol>
+<div class="pager"></div>
+</div>
+</main></div>
+<script src="../assets/site.js"></script>
+<script>
+data().then(({D, D2}) => {
+  const pts = (el, P) => Plotly.newPlot(el, [{x: P.x, y: P.y, mode: "markers", type: "scattergl", hoverinfo: "skip", marker: {size: 4, color: P.c, colorscale: "Viridis", opacity: .8}}],
+    lay({margin: {l: 46, r: 10, t: 10, b: 40}, xaxis: {title: "z₁", gridcolor: "#eef2f7", zerolinecolor: "#94a3b8"}, yaxis: {title: "z₂", gridcolor: "#eef2f7", zerolinecolor: "#94a3b8", scaleanchor: "x"}, showlegend: false}), PCFG);
+  pts("ptsAE", D.planes.ixi_ae); pts("ptsVAE", D.planes.ixi_vae01);
+  // mu / sigma cells
+  picker($("#muPick"), D, k => {
+    $("#muIn").src = A(`pick_${k}.png`);
+    vec($("#muVec"), D.codes16.vae_mu[k], {lim: 3, digits: 1, big: true});
+    const s = D.codes16.vae_sigma[k], el = $("#sgVec"); el.className = "vec big";
+    el.innerHTML = s.map((v, j) => { const t = Math.min(1, v / .1); return `<div class="c${t > .55 ? " dark" : ""}" style="background:rgba(124,58,237,${.08 + .85 * t})" title="σ${j + 1} = ${v}">${v.toFixed(2)}</div>`; }).join("");
+  });
+  // gaussian clouds
+  const getG = seg($("#gSeg"), () => gDraw()), getGd = seg($("#gDim"), () => gDraw());
+  function gDraw() {
+    const P = D.planes[`ixi_${getG()}`], j = +getGd(), xs = []; for (let x = -4; x <= 4.0001; x += .01) xs.push(+x.toFixed(2));
+    const pdf = (x, m, s) => Math.exp(-.5 * ((x - m) / s) ** 2) / (s * Math.sqrt(2 * Math.PI));
+    const tr = [{x: xs, y: xs.map(x => pdf(x, 0, 1)), name: "prior N(0, 1)", mode: "lines", line: {color: "#94a3b8", width: 3}, fill: "tozeroy", fillcolor: "rgba(148,163,184,.15)"}];
+    P.pick_mu.forEach((m, i) => { const mu = m[j], s = P.pick_sigma[i][j]; const lo = mu - 4 * s, hi = mu + 4 * s, xx = []; for (let t = 0; t <= 200; t++) xx.push(lo + (hi - lo) * t / 200);
+      tr.push({x: xx, y: xx.map(x => pdf(x, mu, s)), name: `slice ${i + 1} (μ=${mu.toFixed(2)}, σ=${s.toFixed(2)})`, mode: "lines", line: {color: viridis(i / 7), width: 2}, yaxis: "y2"}); });
+    Plotly.react("gChart", tr, lay({xaxis: {title: `z${j + 1}`, range: [-4, 4], gridcolor: "#eef2f7"}, yaxis: {title: "prior density", gridcolor: "#eef2f7"},
+      yaxis2: {title: "cloud density", overlaying: "y", side: "right", showgrid: false}, legend: {orientation: "h", y: 1.25, font: {size: 10.5}}, margin: {l: 56, r: 56, t: 16, b: 48}}), PCFG);
+  }
+  gDraw();
+  // forward pass diagram with real numbers (first 8 of 16 dims)
+  stepper($("#vaeFig"), [
+    "The encoder reads the image and outputs <b>two</b> vectors: μ (orange/blue cells, where the cloud is) and σ (purple, how big it is). Only the first 8 of the 16 numbers are drawn.",
+    "We draw fresh random numbers ε from a standard bell curve. They don't depend on the image at all.",
+    "We build the code with plain arithmetic: z = μ + σ ⊙ ε (⊙ = multiply number by number). Because σ is tiny at β = 0.1, z ends up very close to μ.",
+    "The decoder turns z into an image, and the loss compares it with x, plus the KL term that keeps the cloud near N(0, I)."]);
+  const cells = (g, vals, x0, y0, colFn) => $(g).innerHTML = vals.map((v, j) => { const c = colFn(v), bg = c.bg || c, dark = !!c.dark;
+    return `<rect x="${x0}" y="${y0 + j * 19}" width="64" height="16" rx="3" fill="${bg}" stroke="#cbd5e1" stroke-width=".6"/><text x="${x0 + 32}" y="${y0 + j * 19 + 12}" text-anchor="middle" class="mono" style="fill:${dark ? "#fff" : "#0f172a"}">${v.toFixed(2)}</text>`; }).join("");
+  picker($("#vPick"), D, k => {
+    $("#vIn").setAttribute("href", A(`pick_${k}.png`));
+    const mu = D.codes16.vae_mu[k].slice(0, 8), sg = D.codes16.vae_sigma[k].slice(0, 8);
+    let s = 7 + k; const rnd = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+    const eps = mu.map(() => { const u = Math.max(1e-6, rnd()), v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); });
+    cells("#vMu", mu, 388, 70, v => divColor(v, 3)); cells("#vSg", sg, 388, 254, v => `rgba(124,58,237,${.1 + .8 * Math.min(1, v / .1)})`);
+    cells("#vEps", eps, 558, 254, v => `rgba(124,58,237,${.08 + .25 * Math.min(1, Math.abs(v) / 2)})`);
+    cells("#vZ", mu.map((m, j) => m + sg[j] * eps[j]), 558, 70, v => divColor(v, 3));
+  });
+  // the decoded output tile: use the VAE beta=0.1, z=16 reconstruction from the ladder sprite (row 2, column 5)
+  const out = $("#vOut");
+  const fixOut = k => { const c = document.createElement("canvas"); c.width = c.height = 112; const im = new Image(); im.onload = () => { c.getContext("2d").drawImage(im, 4 * 114, 114, 112, 112, 0, 0, 112, 112); out.setAttribute("href", c.toDataURL()); }; im.src = A(`ladder_${k}.png`); };
+  $("#vPick").addEventListener("click", e => { const b = e.target.closest("button"); if (b) fixOut(+b.dataset.i); }); fixOut(3);
+  // active units + KL
+  const tr = [];
+  for (const [ds, dash] of [["ixi", "solid"], ["celeba", "dash"]]) for (const mk of ["vae01", "vae1"]) {
+    const g = results(D, ds).filter(r => r.mk === mk).sort((a, b) => a.latent_dim - b.latent_dim);
+    tr.push({x: g.map(r => r.latent_dim), y: g.map(r => r.active_units), name: `${ds === "ixi" ? "IXI" : "CelebA"} · ${MODELS[mk]}`, mode: "lines+markers", line: {color: MCOL[mk], dash, width: 2.4}, marker: {size: 6}});
+  }
+  tr.push({x: [2, 128], y: [2, 128], name: "all used", mode: "lines", line: {color: "#94a3b8", dash: "dot", width: 1}});
+  Plotly.newPlot("actChart", tr, lay({xaxis: logx(), yaxis: {title: "active units", type: "log", tickvals: [2, 4, 8, 16, 32, 64, 128], gridcolor: "#eef2f7"}, legend: {orientation: "h", y: 1.25, font: {size: 10.5}}}), PCFG);
+  const getK = seg($("#klSeg"), () => kl());
+  function kl() { const ds = getK(); Plotly.react("klChart", ["vae01", "vae1"].map(mk => ({y: D.kl_dims[`${ds}_${mk}`], type: "bar", name: MODELS[mk], marker: {color: MCOL[mk]}, opacity: .8})),
+    lay({barmode: "overlay", bargap: 0, xaxis: {title: "latent number (sorted)", gridcolor: "#eef2f7"}, yaxis: {title: "mean KL (nats)", gridcolor: "#eef2f7"}}), PCFG); }
+  kl();
+  // histograms
+  const getH = seg($("#hSeg"), () => hist());
+  function hist() {
+    const mk = getH(), H = D2.hist[mk], e = D2.hist.edges, mids = e.slice(0, -1).map((v, i) => (v + e[i + 1]) / 2);
+    const tr = H.h.map((h, i) => ({x: mids, y: h, name: `z${H.dims[i] + 1} (std ${H.std[H.dims[i]]})`, mode: "lines", line: {color: ["#2563eb", "#ea580c", "#059669"][i], width: 2.2, shape: "hvh"}}));
+    tr.push({x: mids, y: mids.map(x => Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI)), name: "prior N(0, 1)", mode: "lines", line: {color: "#0f172a", dash: "dot", width: 2}});
+    Plotly.react("hChart", tr, lay({xaxis: {title: "latent value", range: [-12, 12], gridcolor: "#eef2f7"}, yaxis: {title: "density", gridcolor: "#eef2f7"}}), PCFG);
+    $("#hCap").innerHTML = `<b>Figure 6.7.</b> ${mk === "ae" ? `<b>AE (no KL term):</b> the codes are wide and off-centre, with spreads around 7–8.5. Random N(0, 1) samples (dotted) cover only a small slice of where the AE really puts its codes, which is why row 1 of Figure 6.1 fails.`
+      : mk === "vae01" ? `<b>VAE β = 0.1:</b> the means now sit almost exactly on the prior: centred at 0 with a spread of about 1. Sampling from N(0, 1) lands where the decoder was trained.`
+      : `<b>VAE β = 1:</b> also matches the prior, and its clouds are wider (median σ ${D2.hist.vae1.sigma_median} vs ${D2.hist.vae01.sigma_median} at β = 0.1), so the space between images is filled even more smoothly.`}`;
+  }
+  hist();
+});
+</script>
+</body></html>

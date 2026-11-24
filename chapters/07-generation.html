@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>7 · Generation and Interpolation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body data-base="../">
+<div class="layout"><main>
+<div class="article">
+<header class="chhead">
+  <div class="eyebrow">Chapter 7 · Generative results</div>
+  <h1>Generation and Interpolation</h1>
+  <p class="sub">Now the fun part: images that don't exist. We'll keep three kinds of images strictly apart, sample new ones, walk in a straight line between two images, and then measure honestly how realistic the generated images are.</p>
+  <div class="meta">Reading time ~13 min</div>
+</header>
+<div class="goals"><h4>By the end of this chapter you will know</h4><ul>
+  <li>the difference between real, reconstructed and generated images, and why it matters;</li>
+  <li>how sampling temperature and the choice of sampler change the results;</li>
+  <li>what latent interpolation shows about a latent space, and how FID measures realism.</li>
+</ul></div>
+
+<h2 id="three"><span class="k">1.</span>Real, reconstructed, generated</h2>
+<p>These three words get mixed up a lot, so let's fix them before looking at any picture:</p>
+<table class="t">
+  <tr><th>kind</th><th>where it comes from</th><th>what it tests</th></tr>
+  <tr><td><span class="badge real">real</span></td><td>a sample from the dataset</td><td>nothing; it's the reference</td></tr>
+  <tr><td><span class="badge recon">reconstructed</span></td><td>real image → encoder → z → decoder</td><td>how much the code preserves</td></tr>
+  <tr><td><span class="badge gen">generated</span></td><td>a <b>new</b> random z → decoder (no input image at all)</td><td>whether the model learned the whole data distribution</td></tr>
+</table>
+<p>A model can reconstruct beautifully and still generate garbage (the plain AE in chapter 6). So whenever you see a "VAE result", ask which of the three it is. Every figure on this site carries one of these badges.</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Real vs generated brains (d = 128)</h4><span><span class="badge real">real</span> <span class="badge gen">generated</span></span></div>
+  <div class="lg"><div></div><div></div><div class="rows"><span>real test slices</span><span style="color:var(--ae)">AE + Gaussian fit</span><span style="color:var(--v01)">VAE β=0.1 prior</span></div><img src="../assets/real_vs_fake_ixi.png" alt="real vs generated"></div>
+  <figcaption><b>Figure 7.1.</b> Top: real slices from 8 random test people. Rows 2–3: brand-new samples, none of these brains exist. They get the anatomy right (skull, ventricles, eyes, slice level) but not the texture: no cortical folds, smoother contrast. Even without any metric, a radiologist would spot the fakes instantly.</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="sampling"><span class="k">2.</span>Two ways to sample a code</h2>
+<p>To generate, we need a random z in the right region of latent space. There are two ways:</p>
+<ul>
+  <li><b>From the prior</b>, ε ~ N(0, I): the VAE way. It only works if training kept the codes near N(0, I), which the KL term does.</li>
+  <li><b>From a Gaussian fitted to the training codes</b>: encode all training images, compute the mean and covariance of their codes, and sample from that. This gives the plain AE a fair way to generate (Ghosh et al., 2020), and it works for the VAE too.</li>
+</ul>
+<div class="math">$$ \text{prior: } z \sim \mathcal N(0, I) \qquad\quad \text{Gaussian fit: } z \sim \mathcal N(\bar z,\, \Sigma_z),\;\; \bar z = \tfrac1N\textstyle\sum_n z_n,\;\; \Sigma_z = \operatorname{cov}(z_n) $$</div>
+
+<h2 id="temperature"><span class="k">3.</span>Temperature: how far from the centre</h2>
+<p>A common knob is <b>temperature</b> T: sample z = T·ε instead of ε. T &lt; 1 stays near the centre of the prior, where the model is most confident. T &gt; 1 wanders further out.</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Temperature sweep (VAE β=0.1, d = 16, the same ε in every row)</h4><span class="badge gen">generated</span></div>
+  <div class="lg"><div></div><div></div><div class="rows"><span>T = 0.5</span><span>T = 0.7</span><span>T = 1.0</span><span>T = 1.3</span></div><img src="../assets/temperature_ixi.png" alt="temperature"></div>
+  <figcaption><b>Figure 7.2.</b> Each column uses the same random direction ε, only scaled. At T = 0.5 every brain looks like the "average brain" at some level: clean but boring. At T = 1.3 there is more variety, and also more broken shapes, because the codes leave the region the decoder was trained on.</figcaption>
+</div></div>
+<div class="article">
+<p>Lower temperature looks "cleaner" to the eye, but it is not better. On CelebA, going from T = 1.0 to T = 0.7 made FID <b>worse</b> at every latent size from 8 up (for example 77 → 107 at d = 64), because the samples lose variety and FID punishes that.</p>
+
+<h2 id="interp"><span class="k">4.</span>Walking between two images</h2>
+<p>Take two images, encode them to z₁ and z₂, and decode points on the straight line between them:</p>
+<div class="math">$$ z(t) = (1-t)\,z_1 + t\,z_2, \qquad t \in [0, 1] $$<div class="c">t = 0 gives image 1, t = 1 gives image 2; the points in between show what the latent space "thinks" lies between them</div></div>
+<p>If the latent space is well organised, the decoded path morphs smoothly and every middle image looks plausible. If it has gaps, the path crosses them and you see garbage halfway. Here are two real IXI slices, one low and one high in the head, interpolated in all three d = 128 models.</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Real → real interpolation (IXI, d = 128)</h4><span><span class="badge real">ends: real</span> <span class="badge gen">middle: decoded</span></span></div>
+  <div class="lg"><div></div><div class="cols" style="grid-template-columns:repeat(10,1fr)"><span>real</span><span>t=0</span><span></span><span></span><span></span><span></span><span></span><span></span><span>t=1</span><span>real</span></div>
+    <div class="rows"><span style="color:var(--ae)">AE</span><span style="color:var(--v01)">VAE β=0.1</span><span style="color:var(--v1)">VAE β=1</span></div><img src="../assets/interp_ixi.png" alt="ixi interpolation"></div>
+  <figcaption><b>Figure 7.3.</b> All three morph smoothly from a low slice to a high one, passing through realistic mid-level slices. On brains, even the AE's path stays plausible: the data lie on a narrow manifold (mostly "slice height"), and straight lines between real codes stay close to it.</figcaption>
+</div>
+<div class="fig">
+  <div class="fig-h"><h4>Face → face interpolation: AE vs VAE (CelebA)</h4><span class="badge gen">generated faces only</span></div>
+  <div class="ctl"><span class="l">latent size</span><div class="seg" id="icSeg"><button data-v="16">d = 16</button><button data-v="128" class="on">d = 128</button></div></div>
+  <div class="lg"><div></div><div class="cols" style="grid-template-columns:repeat(10,1fr)"><span>face A</span><span>t=0</span><span></span><span></span><span></span><span></span><span></span><span></span><span>t=1</span><span>face B</span></div>
+    <div class="rows"><span style="color:var(--ae)">AE</span><span style="color:var(--v01)">VAE β=0.1</span><span style="color:var(--v1)">VAE β=1</span></div><img id="icImg" alt="celeba interpolation"></div>
+  <figcaption><b>Figure 7.4.</b> Because CelebA faces can't be shown, faces A and B are themselves generated (by the VAE β=0.1, d = 128). Each model then encodes A and B and decodes the straight line between them. AE and VAE β=0.1 move smoothly through plausible intermediate faces. VAE β=1 drifts through a pinkish, washed-out middle: its codes for A and B are blurrier summaries, and the path between them passes through "average-colour" territory.</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="fid"><span class="k">5.</span>How realistic are the samples? FID</h2>
+<p>Looking at pictures is not enough, so I measured realism with the <b>Fréchet Inception Distance</b>. FID passes thousands of real and thousands of generated images through a pretrained image network (Inception-v3), fits a Gaussian to the features of each set, and measures the distance between the two Gaussians:</p>
+<div class="math">$$ \mathrm{FID} = \lVert m_r - m_g\rVert^2 + \operatorname{Tr}\Big(\Sigma_r + \Sigma_g - 2\big(\Sigma_r\Sigma_g\big)^{1/2}\Big) $$<div class="c">lower is better; it penalises both unrealistic images and missing variety</div></div>
+<p>A raw FID number means little on its own, so I also computed a <b>real-vs-real floor</b>: FID between two different sets of real test images. That's what "indistinguishable" looks like: 5.6 on IXI and 3.0 on CelebA.</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>FID of generated samples vs latent size</h4><span class="badge diag">up to 10,000 images per set</span></div>
+  <div class="ctl"><span class="l">data</span><div class="seg" id="fidSeg"><button data-v="ixi" class="on">IXI</button><button data-v="celeba">CelebA</button></div></div>
+  <div id="fidChart" class="chart"></div>
+  <figcaption><b>Figure 7.5.</b> Solid: the model's natural sampler (prior for the VAEs, Gaussian fit for the AE). Dotted grey: real vs real. Every model is far above the floor, so none of them is close to realistic. More latent numbers help up to about 16–64. And the surprise: the plain <b>AE + Gaussian fit</b> is as good as the VAE, and on brains at d = 128 even better (121 vs 131 for β = 0.1 and 137 for β = 1).</figcaption>
+</div></div>
+<div class="article">
+<h3>Failure analysis</h3>
+<ul>
+  <li><b>Out-of-distribution codes.</b> The AE fed plain N(0, I) codes produces broken heads (Figure 6.1, row 1). It isn't the decoder's fault; the codes are where it was never trained.</li>
+  <li><b>Blur everywhere.</b> Same pixel-wise loss as the reconstructions, so generated images are just as smooth: no cortical folds, no hair texture.</li>
+  <li><b>High temperature breaks anatomy</b> (Figure 7.2, T = 1.3): skulls with odd shapes, mixed-up levels.</li>
+  <li><b>β = 1 drifts in colour</b> during interpolation on faces (Figure 7.4): its compressed codes lose colour detail.</li>
+</ul>
+<div class="warn"><b>Limitations.</b> FID uses ImageNet features; on grayscale MRI it is useful for ranking models but not as an absolute realism score, and it is biased by sample size (I always compare at the same size within a dataset). One seed per model: treat FID differences of a few points as noise.</div>
+<div class="key"><h4>Key takeaways</h4><ul>
+  <li>Keep real, reconstructed and generated apart: they answer different questions.</li>
+  <li>Generation = sample z in the right region, then decode. The VAE uses N(0, I); an AE needs a fitted Gaussian.</li>
+  <li>Lower temperature looks cleaner but loses variety; FID gets worse.</li>
+  <li>Interpolation is a direct test of latent-space quality. FID says all these models are still far from real images.</li>
+</ul></div>
+<h3>References</h3>
+<ol class="refs">
+  <li>Ghosh et al. (2020). From Variational to Deterministic Autoencoders. ICLR.</li>
+  <li>Heusel et al. (2017). GANs Trained by a Two Time-Scale Update Rule Converge to a Local Nash Equilibrium (FID). NeurIPS.</li>
+  <li>White (2016). Sampling Generative Networks (spherical vs linear interpolation). arXiv:1609.04468.</li>
+  <li>Kingma, Dhariwal (2018). Glow: Generative Flow with Invertible 1×1 Convolutions (temperature sampling). NeurIPS.</li>
+</ol>
+<div class="pager"></div>
+</div>
+</main></div>
+<script src="../assets/site.js"></script>
+<script>
+data().then(({D}) => {
+  seg($("#icSeg"), v => $("#icImg").src = A(`interp_celeba_${v}.png`)); $("#icImg").src = A("interp_celeba_128.png");
+  const getF = seg($("#fidSeg"), () => fid());
+  function fid() {
+    const ds = getF(), rows = results(D, ds), tr = [];
+    for (const mk of Object.keys(MODELS)) {
+      const g = rows.filter(r => r.mk === mk).sort((a, b) => a.latent_dim - b.latent_dim), key = mk === "ae" ? "fid_gauss" : "fid_prior";
+      tr.push({x: g.map(r => r.latent_dim), y: g.map(r => r[key]), name: mk === "ae" ? "AE · Gaussian fit" : `${MODELS[mk]} · prior`, mode: "lines+markers", line: {color: MCOL[mk], width: 2.6}, marker: {size: 7}});
+    }
+    const floor = rows.find(r => r.fid_real_floor != null).fid_real_floor;
+    tr.push({x: [2, 128], y: [floor, floor], name: `real vs real (${floor.toFixed(1)})`, mode: "lines", line: {color: "#94a3b8", dash: "dot", width: 2}});
+    Plotly.react("fidChart", tr, lay({xaxis: logx(), yaxis: {title: "FID (lower is better)", type: "log", gridcolor: "#eef2f7"}}), PCFG);
+  }
+  fid();
+});
+</script>
+</body></html>

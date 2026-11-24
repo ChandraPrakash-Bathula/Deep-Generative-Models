@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1 · Understanding Autoencoders</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body data-base="../">
+<div class="layout"><main>
+<div class="article">
+<header class="chhead">
+  <div class="eyebrow">Chapter 1 · Foundations</div>
+  <h1>Understanding Autoencoders</h1>
+  <p class="sub">Before any equation, let's understand the game an autoencoder plays: squeeze an image into a handful of numbers, then rebuild it from those numbers alone.</p>
+  <div class="meta">Reading time ~12 min · all images and numbers come from my trained models</div>
+</header>
+
+<div class="goals"><h4>By the end of this chapter you will know</h4><ul>
+  <li>what an encoder, a latent representation and a decoder are, and why we compress at all;</li>
+  <li>the three equations behind every autoencoder: \(z=f_\theta(x)\), \(\hat x=g_\phi(z)\) and the reconstruction loss;</li>
+  <li>what a real reconstruction looks like on a brain MRI slice, and how training brings the loss down.</li>
+</ul></div>
+
+<h2 id="game"><span class="k">1.</span>The game: describe a picture with only a few numbers</h2>
+<p class="lead">Let's start with a small game. I show you a brain scan, and you are allowed to describe it to your friend over the phone using only <b>16 numbers</b>. Your friend then has to redraw the scan from those 16 numbers alone.</p>
+<p>How would you choose the numbers? You would not waste them on the black background. You would probably say things like "this cut is low in the head, near the eyes", "the brain is big", "the ventricles are dark and wide". In simple words, you would keep what matters and throw away the rest.</p>
+<p>An autoencoder is a neural network that learns to play exactly this game, on its own, from thousands of examples. Click through the steps below. Everything in it is real: the slice is a test image the model never saw, the 16 coloured cells are the actual numbers the trained model produced for it, and the output is what the model drew back.</p>
+</div>
+
+<div class="wide"><div class="fig" id="gameFig">
+  <div class="fig-h"><h4>The autoencoder game, step by step</h4><span class="badge int">interactive · actual run</span></div>
+  <div class="steps"></div>
+  <svg class="dia" viewBox="0 0 1000 330" aria-label="encoder decoder diagram">
+    <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>
+    <g data-step="1">
+      <rect x="18" y="58" width="184" height="184" rx="10" fill="#000"/>
+      <image id="gIn" x="20" y="60" width="180" height="180"/>
+      <text x="110" y="40" text-anchor="middle" class="ttl">input image  x</text>
+      <text x="110" y="268" text-anchor="middle" class="lbl">128 × 128 pixels</text>
+      <text x="110" y="288" text-anchor="middle" class="sm">= 16,384 numbers between 0 and 1</text>
+    </g>
+    <g data-step="2">
+      <path d="M215 150 L240 150" stroke="#64748b" stroke-width="2" marker-end="url(#ah)"/>
+      <polygon points="245,70 365,118 365,182 245,230" fill="#dbeafe" stroke="#93c5fd" stroke-width="1.5"/>
+      <text x="300" y="146" text-anchor="middle" class="ttl">ENCODER</text>
+      <text x="300" y="164" text-anchor="middle" class="sm">f<tspan baseline-shift="sub" font-size="9">θ</tspan> (squeeze)</text>
+      <path d="M368 150 L392 150" stroke="#64748b" stroke-width="2" marker-end="url(#ah)"/>
+      <g id="gZ"></g>
+      <text x="420" y="40" text-anchor="middle" class="ttl">latent code  z</text>
+      <text x="420" y="300" text-anchor="middle" class="sm">just 16 numbers</text>
+    </g>
+    <g data-step="3">
+      <path d="M448 150 L472 150" stroke="#64748b" stroke-width="2" marker-end="url(#ah)"/>
+      <polygon points="477,118 597,70 597,230 477,182" fill="#ffedd5" stroke="#fdba74" stroke-width="1.5"/>
+      <text x="537" y="146" text-anchor="middle" class="ttl">DECODER</text>
+      <text x="537" y="164" text-anchor="middle" class="sm">g<tspan baseline-shift="sub" font-size="9">φ</tspan> (rebuild)</text>
+      <path d="M600 150 L624 150" stroke="#64748b" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="628" y="58" width="184" height="184" rx="10" fill="#000"/>
+      <image id="gOut" x="630" y="60" width="180" height="180"/>
+      <text x="720" y="40" text-anchor="middle" class="ttl">reconstruction  x̂</text>
+      <text x="720" y="268" text-anchor="middle" class="lbl">128 × 128 pixels again</text>
+    </g>
+    <g data-step="4">
+      <rect x="838" y="104" width="148" height="92" rx="12" fill="#ecfdf5" stroke="#6ee7b7"/>
+      <text x="912" y="132" text-anchor="middle" class="ttl" fill="#047857">compare</text>
+      <text x="912" y="153" text-anchor="middle" class="lbl">mean (x − x̂)²</text>
+      <text x="912" y="176" text-anchor="middle" class="mono" id="gLoss"></text>
+      <path d="M812 150 L834 150" stroke="#64748b" stroke-width="2" marker-end="url(#ah)"/>
+      <path d="M912 196 C 912 320, 300 320, 300 236" fill="none" stroke="#059669" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#ah)"/>
+      <path d="M912 196 C 912 300, 537 300, 537 236" fill="none" stroke="#059669" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#ah)"/>
+      <text x="700" y="318" text-anchor="middle" class="sm" fill="#047857">adjust the weights of both networks to make the error smaller</text>
+    </g>
+  </svg>
+  <div class="stepnote"></div>
+  <div id="gPick" style="margin-top:8px"></div>
+</div></div>
+
+<div class="article">
+<p>That's the whole idea. The first network, the <b>encoder</b>, squeezes the image into a short list of numbers. The second network, the <b>decoder</b>, tries to rebuild the image from that list. And the only teacher is the image itself: the closer the rebuilt image is to the original, the better.</p>
+<div class="arrow">image x <span class="k">→ encoder →</span> latent code z <span class="k">→ decoder →</span> reconstruction x̂ <span class="k">→</span> compare with x</div>
+<p>Notice what is missing here: <b>labels</b>. Nobody told the model "this slice is near the eyes" or "this person is 60 years old". The image is both the input and the target. That's why autoencoders belong to <b>unsupervised</b> (or self-supervised) learning.</p>
+
+<h2 id="why"><span class="k">2.</span>Why would anyone want to compress an image?</h2>
+<div class="q"><span class="h">But why?</span>If the output is just a copy of the input, what did we gain? The answer is: the copy is not the point. The <b>16 numbers in the middle</b> are the point.</div>
+<p>To squeeze 16,384 pixels into 16 numbers, the network has no choice: it has to discover what is <b>common</b> across thousands of brains and describe each brain by how it <b>differs</b>. That short description is called a <b>representation</b>, and learning good representations without labels is one of the oldest goals in machine learning. Here is why it's useful:</p>
+<ul>
+  <li><b>Compression:</b> store or send 16 numbers instead of 16,384.</li>
+  <li><b>Denoising:</b> noise is not "common across brains", so a small bottleneck tends to drop it.</li>
+  <li><b>Anomaly detection:</b> a scan that is unusual reconstructs badly, and a big error is a red flag. This is a very common use in medical imaging.</li>
+  <li><b>Features for other tasks:</b> the code can feed a classifier when labels are scarce.</li>
+  <li><b>Generation:</b> if we understand the space of codes, we can create new images. That's what the Variational Autoencoder (chapter 6) is built for.</li>
+</ul>
+
+<h3>A bit of history</h3>
+<p>The idea is older than most of deep learning. In 1986 Rumelhart, Hinton and Williams already trained small networks to copy their input through a narrow hidden layer. Then in 1988 Bourlard and Kamp proved something funny: if the network is purely linear, the best it can do is exactly <b>PCA</b>. So for a while, autoencoders were "PCA with extra steps". In 2006 Hinton and Salakhutdinov showed in <i>Science</i> that a <b>deep, non-linear</b> autoencoder compresses images far better than PCA, and in 2013 Kingma and Welling turned it into a generative model, the VAE. We'll travel that same path in this series.</p>
+
+<h2 id="parts"><span class="k">3.</span>The three parts, one by one</h2>
+<h3>The encoder</h3>
+<p>The encoder is a function that takes the image and outputs a vector. In our case it's a convolutional network that shrinks the image step by step (chapter 2 opens it up layer by layer).</p>
+<div class="arrow">Encoder <span class="k">=></span> image (128×128) in, short vector z out. It decides <b>what to keep</b>.</div>
+<h3>The latent representation</h3>
+<p>The vector z is called the <b>latent code</b> or <b>latent representation</b>. "Latent" just means hidden: these numbers are never given to the model, it invents them. The length of z is the <b>latent dimension</b>, and it is the most important design choice in this whole project. I trained models with 2, 3, 4, 8, 16, 64 and 128 latent numbers.</p>
+<h3>The decoder</h3>
+<p>The decoder is the mirror image: it takes z and grows it back into a 128×128 image.</p>
+<div class="arrow">Decoder <span class="k">=></span> short vector z in, image out. It has to <b>imagine everything the code didn't say</b>.</div>
+
+<h2 id="math"><span class="k">4.</span>The mathematics, in three lines</h2>
+<p>Now that the picture is clear, the formulas are short. The encoder is a function \(f\) with weights \(\theta\), the decoder a function \(g\) with weights \(\phi\):</p>
+<div class="math">$$ z = f_\theta(x) \qquad\qquad \hat{x} = g_\phi(z) = g_\phi\big(f_\theta(x)\big) $$<div class="c">x is the image, z the latent code, x̂ the reconstruction</div></div>
+<p>To measure how good the reconstruction is, we compare it pixel by pixel. I use the mean squared error over all D = 16,384 pixels:</p>
+<div class="math">$$ \mathcal{L}(x,\hat{x}) \;=\; \frac{1}{D}\,\lVert x-\hat{x}\rVert^2 \;=\; \frac{1}{D}\sum_{i=1}^{D}\big(x_i-\hat{x}_i\big)^2 $$<div class="c">0 means a perfect copy; every pixel is between 0 and 1, so the worst case is 1</div></div>
+<p>And training means finding the weights that make this error small on average over the whole training set:</p>
+<div class="math">$$ \theta^*,\phi^* \;=\; \arg\min_{\theta,\phi}\; \frac{1}{N}\sum_{n=1}^{N} \mathcal{L}\Big(x^{(n)},\; g_\phi\big(f_\theta(x^{(n)})\big)\Big) $$<div class="c">solved with gradient descent (AdamW) and backpropagation, one mini-batch of 64 slices at a time</div></div>
+<p>Here, the important thing is that the encoder and the decoder are trained <b>together</b>, by one loss. The encoder only learns what is useful for the decoder, and the decoder only learns to read the encoder's language.</p>
+<div class="note">You will often see quality reported as <b>PSNR</b> (peak signal-to-noise ratio) instead of MSE: \(\text{PSNR} = 10\log_{10}(1/\text{MSE})\) in decibels. It's the same information on a log scale; higher is better. An MSE of 0.003 is about 25 dB.</div>
+
+<h2 id="first-results"><span class="k">5.</span>A first look at real results</h2>
+<p>Enough theory. Here is a test slice, its 16-number code and its reconstruction from my trained autoencoder (latent dimension 16). Pick different slices: low ones show the eyes and cerebellum, high ones the top of the brain.</p>
+</div>
+
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Original → encoded representation → reconstruction</h4><span><span class="badge real">real</span> <span class="badge recon">reconstructed</span></span></div>
+  <div id="frPick" style="margin-bottom:14px"></div>
+  <div class="three" style="grid-template-columns:1fr 1.3fr 1fr;align-items:center">
+    <div><div class="imgbox"><img id="frIn" alt="original"></div><div class="lab">original x (16,384 numbers)</div></div>
+    <div><div id="frZ"></div><div class="vec-legend"><span>negative</span><span class="bar"></span><span>positive</span></div><div class="lab" style="text-align:left">z = f<sub>θ</sub>(x): the 16 numbers the encoder wrote down</div></div>
+    <div><div class="imgbox"><img id="frOut" alt="reconstruction"></div><div class="lab" id="frPsnr">reconstruction x̂</div></div>
+  </div>
+  <figcaption><b>Figure 1.1.</b> A real IXI test slice, the actual latent code of the trained AE (z = 16) and the decoder's output. The shape, the skull, the dark ventricles and the slice level all survive. The fine folds of the cortex don't: 16 numbers are not enough to say where every fold is, so the decoder draws a smooth average. We'll come back to this blur many times.</figcaption>
+</div>
+<div class="fig">
+  <div class="fig-h"><h4>Training and validation loss (AE, z = 16)</h4><span class="badge diag">actual training log</span></div>
+  <div id="lossChart" class="chart"></div>
+  <figcaption><b>Figure 1.2.</b> Mean squared error per pixel over training. Both curves fall fast in the first 10 epochs as the model learns the overall head shape, then slowly as it learns details. Training loss is computed on augmented images, validation on clean held-out brains. Training stopped itself at epoch 36 because validation stopped improving (early stopping); the saved model is from epoch 21, the lowest validation point.</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="code"><span class="k">6.</span>Implementation: an autoencoder in PyTorch</h2>
+<p>Here is the core of my model, trimmed for reading. The full version is in the <a href="https://github.com/ChandraPrakash-Bathula/Auto-Encoders">Auto-Encoders repo</a>.</p>
+<pre><code class="language-python">class Autoencoder(nn.Module):
+    def __init__(self, latent_dim=16):
+        super().__init__()
+        self.encoder = Encoder(latent_dim)      # 128x128 image  -> latent_dim numbers
+        self.decoder = Decoder(latent_dim)      # latent_dim numbers -> 128x128 image
+
+    def forward(self, x):
+        z = self.encoder(x)                     # z = f_theta(x)
+        x_hat = self.decoder(z)                 # x_hat = g_phi(z)
+        return x_hat, z
+
+# one training step
+x_hat, z = model(x)                             # x: a batch of 64 slices, values in [0, 1]
+loss = F.mse_loss(x_hat, x)                     # (1/D) * ||x - x_hat||^2, averaged over the batch
+optimizer.zero_grad()
+loss.backward()                                 # backpropagation through decoder AND encoder
+optimizer.step()                                # AdamW, lr 2e-4</code></pre>
+
+<h2 id="dimred"><span class="k">7.</span>Why dimensionality reduction matters</h2>
+<p>An image lives in a space with 16,384 axes, one per pixel. But real brain slices fill only a tiny, curved corner of that space: almost every random 128×128 image is just noise. The set of "plausible brain slices" is called a <b>manifold</b>, and it has far fewer degrees of freedom than 16,384: slice height, head size, ventricle shape, contrast, and so on.</p>
+<p>An autoencoder tries to find coordinates for that manifold. With PCA (the linear version) the coordinates have to be straight lines. With a deep, non-linear encoder they can bend along the manifold, which is why a 16-number autoencoder reconstructs far better than 16 principal components.</p>
+
+<div class="warn"><b>Limitations to keep in mind.</b> A pixel-wise loss rewards blurry averages, so fine texture is lost first. A good reconstruction score says nothing about clinical usefulness: these models are research tools, not diagnostic ones. And a plain autoencoder has no rule about <i>where</i> codes go, which is why it can't generate new images reliably (chapter 6).</div>
+<div class="key"><h4>Key takeaways</h4><ul>
+  <li>Autoencoder = encoder \(f_\theta\) + bottleneck z + decoder \(g_\phi\), trained to copy the input through the bottleneck.</li>
+  <li>The value is in the bottleneck: it forces the model to learn a compact representation without labels.</li>
+  <li>Loss = mean squared error between input and reconstruction; quality is often reported as PSNR.</li>
+  <li>Small bottlenecks keep the structure and lose the fine detail, so reconstructions look smooth.</li>
+</ul></div>
+<h3>References</h3>
+<ol class="refs">
+  <li>Rumelhart, Hinton, Williams (1986). Learning representations by back-propagating errors. <i>Nature</i> 323.</li>
+  <li>Bourlard, Kamp (1988). Auto-association by multilayer perceptrons and singular value decomposition. <i>Biological Cybernetics</i> 59.</li>
+  <li>Hinton, Salakhutdinov (2006). Reducing the dimensionality of data with neural networks. <i>Science</i> 313.</li>
+  <li>Goodfellow, Bengio, Courville (2016). <i>Deep Learning</i>, chapter 14: Autoencoders.</li>
+</ol>
+<div class="pager"></div>
+</div>
+</main></div>
+<script src="../assets/site.js"></script>
+<script>
+data().then(({D}) => {
+  // the step-by-step game diagram
+  stepper($("#gameFig"), [
+    "Start with one real test slice. To a computer it is a grid of 128 × 128 = 16,384 brightness values between 0 (black) and 1 (white).",
+    "The <b>encoder</b> squeezes all 16,384 values into just <b>16 numbers</b>, the latent code z. Each coloured cell is one of the actual numbers the trained model produced for this slice (orange = positive, blue = negative).",
+    "The <b>decoder</b> takes only those 16 numbers and draws a full 128 × 128 image back. It never sees the original.",
+    "Training compares the reconstruction with the original, pixel by pixel. The error flows back (dashed arrows) and nudges the weights of both networks so that next time the error is a little smaller. Repeat this for ~25,000 slices, many times."]);
+  const drawGame = k => {
+    $("#gIn").setAttribute("href", A(`pick_${k}.png`)); $("#gOut").setAttribute("href", A(`rec16_${k}.png`));
+    const z = D.codes16.ae[k], lim = Math.max(...z.map(Math.abs));
+    $("#gZ").innerHTML = z.map((v, j) => { const c = divColor(v, lim); return `<rect x="400" y="${58 + j * 14.5}" width="40" height="12.5" rx="2.5" fill="${c.bg}" stroke="#cbd5e1" stroke-width=".6"><title>z${j + 1} = ${v}</title></rect>`; }).join("");
+    $("#gLoss").textContent = `PSNR ${D.ladder.psnr[String(k)].ae["16"]} dB`;
+  };
+  picker($("#gPick"), D, drawGame);
+
+  // original -> code -> reconstruction
+  picker($("#frPick"), D, k => {
+    $("#frIn").src = A(`pick_${k}.png`); $("#frOut").src = A(`rec16_${k}.png`);
+    vec($("#frZ"), D.codes16.ae[k], {lim: 9, digits: 1, big: true});
+    $("#frPsnr").textContent = `reconstruction x̂ = g(z) · PSNR ${D.ladder.psnr[String(k)].ae["16"]} dB`;
+  });
+
+  // loss curves
+  const h = D.history.v2_ae16;
+  Plotly.newPlot("lossChart", [
+    {x: h.epoch, y: h.train_loss, name: "training loss", mode: "lines", line: {color: "#94a3b8", width: 2.5}},
+    {x: h.epoch, y: h.val_loss, name: "validation loss", mode: "lines", line: {color: "#1e40af", width: 2.5}},
+    {x: [21], y: [Math.min(...h.val_loss)], name: "saved model (epoch 21)", mode: "markers", marker: {color: "#0ea5e9", size: 11, symbol: "star"}}],
+    lay({xaxis: {title: "epoch", gridcolor: "#eef2f7"}, yaxis: {title: "MSE per pixel", type: "log", gridcolor: "#eef2f7"}}), PCFG);
+});
+</script>
+</body></html>

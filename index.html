@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>From Pixels to Latent Spaces</title>
+<meta name="description" content="Understanding Autoencoders and Variational Autoencoders: an experimental, visual-first journey through representation learning and generative modelling, on brain MRI and faces.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+.hero{padding:70px 0 30px}
+.hero h1{font-size:clamp(40px,6vw,66px);margin:12px 0 16px}
+.hero .sub{font-size:21px;max-width:720px}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin:26px 0 8px}
+.cta a{text-decoration:none;font-weight:600;font-size:15px;padding:11px 18px;border-radius:12px}
+.cta .p{background:var(--navy);color:#fff} .cta .p:hover{background:var(--navy2)}
+.cta .s{border:1px solid var(--rule2);color:var(--navy);background:#fff} .cta .s:hover{border-color:var(--sky)}
+.pipe{display:grid;grid-template-columns:150px 40px 1fr 40px 150px;align-items:center;gap:8px;margin:34px 0 10px;max-width:760px}
+.pipe .ar{text-align:center;color:var(--muted);font-size:22px}
+.pipe .zc{display:flex;flex-direction:column;align-items:center;gap:6px}
+@media (max-width:700px){.pipe{grid-template-columns:1fr;}.pipe .ar{transform:rotate(90deg)}}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin:20px 0}
+.card{display:block;text-decoration:none;border:1px solid var(--rule);border-radius:16px;padding:18px;background:#fff;color:var(--ink);transition:border-color .15s,transform .15s}
+a.card:hover{border-color:var(--sky);transform:translateY(-2px)}
+.card .n{font-family:var(--mono);font-size:12px;color:var(--sky);font-weight:500}
+.card .t{font-weight:700;font-size:17px;color:var(--navy);margin:4px 0 6px;line-height:1.25}
+.card .d{font-size:14px;color:var(--muted);line-height:1.5}
+.series .card.done{border-color:color-mix(in srgb,var(--v1) 40%,var(--rule))}
+.series .card .st{display:inline-block;margin-top:10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;padding:3px 9px;border-radius:99px}
+.st.done{background:#ecfdf5;color:#047857} .st.next{background:var(--sky2);color:#0369a1} .st.later{background:var(--bg3);color:var(--muted)}
+.ds{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:820px){.ds{grid-template-columns:1fr}}
+.ds .card img{width:100%;border-radius:10px;display:block;margin-top:12px;background:#000}
+</style>
+</head>
+<body data-base="">
+<div class="layout"><main>
+<div class="wide">
+<section class="hero">
+  <div class="eyebrow">Deep Generative Models · Part 1</div>
+  <h1>From Pixels to Latent Spaces</h1>
+  <p class="sub">Understanding <b>Autoencoders</b> and <b>Variational Autoencoders</b>: an experimental, visual-first journey through representation learning and generative modelling, built entirely from my own trained models on brain MRI and faces.</p>
+  <div class="cta"><a class="p" href="chapters/01-foundations.html">Start reading: Chapter 1 →</a><a class="s" href="explorer.html">Open the Experiment Explorer</a></div>
+  <div class="pipe" id="pipe">
+    <div><div class="imgbox"><img src="assets/pick_3.png" alt="input"></div><div class="lab"><span class="badge real">real</span> 16,384 pixels</div></div>
+    <div class="ar">→</div>
+    <div class="zc"><div id="zcells"></div><div class="lab">encoder → <b>16 numbers</b> → decoder</div></div>
+    <div class="ar">→</div>
+    <div><div class="imgbox"><img src="assets/rec16_3.png" alt="reconstruction"></div><div class="lab"><span class="badge recon">reconstructed</span></div></div>
+  </div>
+  <p class="cap" style="max-width:760px">A real test slice, the actual 16-number code my trained autoencoder writes for it, and the image it rebuilds from those 16 numbers alone. Why it comes back blurry, what those numbers mean, and how a VAE turns this into a model that can create new images: that's what these chapters are about.</p>
+</section>
+
+<div class="tiles">
+  <div class="tile"><div class="v">39</div><div class="k">trained models (AE, VAE β=0.1, VAE β=1)</div></div>
+  <div class="tile"><div class="v">2 → 128</div><div class="k">latent sizes compared, low to high</div></div>
+  <div class="tile"><div class="v">2</div><div class="k">datasets: IXI brain MRI and CelebA faces</div></div>
+  <div class="tile"><div class="v">8</div><div class="k">illustrated chapters, intuition → maths → results</div></div>
+</div>
+
+<h2 id="chapters">The chapters</h2>
+<p>Each chapter follows the same pattern: learning objectives, the intuition, the mathematics, a diagram, the implementation, real results, how to read them, limitations and key takeaways. Read them in order, or jump straight to what you need.</p>
+<div class="cards" id="chapterCards"></div>
+
+<h2 id="datasets">Two datasets, one protocol</h2>
+<div class="ds">
+  <div class="card"><div class="n">Medical</div><div class="t">IXI brain MRI</div><div class="d">T1 scans of 581 healthy adults, cut into 128×128 axial slices and split by person (407 / 87 / 87). Every brain shown here is a real test slice the models never saw, or is clearly marked as reconstructed or generated.</div><img src="assets/subject_slices.png" alt="IXI slices"></div>
+  <div class="card"><div class="n">Natural images</div><div class="t">CelebA faces</div><div class="d">~200,000 aligned celebrity photos at 64×64 colour, official split. The licence forbids redistributing the photos, so <b>every face on this site is generated</b> by a model.</div><img src="assets/celeba_by_z.png" alt="generated faces"></div>
+</div>
+
+<h2 id="series">The series</h2>
+<p>This is part 1 of a longer series on deep generative models. Each part uses the same honest approach: real experiments, real failures, and visual explanations.</p>
+<div class="cards series">
+  <a class="card done" href="chapters/01-foundations.html"><div class="n">01</div><div class="t">Autoencoders</div><div class="d">Compression, reconstruction and representation learning.</div><span class="st done">Completed</span></a>
+  <a class="card done" href="chapters/06-vae.html"><div class="n">02</div><div class="t">Variational Autoencoders</div><div class="d">Probability distributions, latent sampling and generation.</div><span class="st done">Completed</span></a>
+  <div class="card"><div class="n">03</div><div class="t">Diffusion Models</div><div class="d">The forward noise process, reverse denoising, image generation.</div><span class="st next">Next</span></div>
+  <div class="card"><div class="n">04</div><div class="t">World Models</div><div class="d">Learning representations of environments and their dynamics.</div><span class="st later">Planned</span></div>
+  <div class="card"><div class="n">05</div><div class="t">JEPA</div><div class="d">Predictive representation learning in latent space.</div><span class="st later">Planned</span></div>
+</div>
+
+<h2 id="resources">Code, models and demo</h2>
+<div class="cards">
+  <a class="card" href="https://github.com/ChandraPrakash-Bathula/Auto-Encoders"><div class="n">GitHub</div><div class="t">Auto-Encoders</div><div class="d">Autoencoder code, configs, training scripts, every figure and metric.</div></a>
+  <a class="card" href="https://github.com/ChandraPrakash-Bathula/Variational-AutoEncoders"><div class="n">GitHub</div><div class="t">Variational-AutoEncoders</div><div class="d">VAE code, configs, training scripts, every figure and metric.</div></a>
+  <a class="card" href="https://huggingface.co/ChandraPrakashBathula/medlatent-autoencoder"><div class="n">Hugging Face</div><div class="t">Trained weights</div><div class="d">All checkpoints (safetensors) for the AE and the VAE repos.</div></a>
+  <a class="card" href="https://huggingface.co/spaces/ChandraPrakashBathula/medlatent-studio"><div class="n">Hugging Face Space</div><div class="t">MedLatent Studio</div><div class="d">Live demo: clusters, real vs generated, latent walks.</div></a>
+</div>
+<p class="note">By Chandra Prakash Bathula. Research models only: reconstructed or generated brain images are not diagnostic images.</p>
+</div>
+</main></div>
+<script src="assets/site.js"></script>
+<script>
+$("#chapterCards").innerHTML = CHAPTERS.map((c, i) => `<a class="card" href="chapters/${c.f}"><div class="n">Chapter ${String(i + 1).padStart(2, "0")}</div><div class="t">${c.t}</div><div class="d">${c.d}</div></a>`).join("") +
+  `<a class="card" href="explorer.html"><div class="n">Tool</div><div class="t">Experiment Explorer</div><div class="d">Every run in one dashboard: dataset, model, latent size, PCA / t-SNE / UMAP, 2D / 3D, metrics and samples.</div></a>`;
+data().then(({D}) => vec($("#zcells"), D.codes16.ae[3], {lim: 9, digits: 1}));
+</script>
+</body></html>

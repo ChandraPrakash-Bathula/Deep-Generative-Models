@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4 · Visualizing Latent Spaces</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body data-base="../">
+<div class="layout"><main>
+<div class="article">
+<header class="chhead">
+  <div class="eyebrow">Chapter 4 · Visualization</div>
+  <h1>Visualizing Latent Spaces</h1>
+  <p class="sub">A 64-number code can't be drawn. So we squash it into 2 or 3 dimensions with PCA, t-SNE or UMAP. Each method squashes differently, and each one can fool you. Let's learn what they keep, what they throw away, and how to read them honestly.</p>
+  <div class="meta">Reading time ~15 min</div>
+</header>
+<div class="goals"><h4>By the end of this chapter you will know</h4><ul>
+  <li>the difference between a model <i>trained</i> with 2 latent numbers and a 64-number model <i>projected</i> to 2-D;</li>
+  <li>how PCA, t-SNE and UMAP work, and what explained variance, perplexity, n_neighbors and min_dist do;</li>
+  <li>which visual patterns you can trust (neighbourhoods) and which you can't (cluster sizes and gaps in t-SNE/UMAP).</li>
+</ul></div>
+
+<h2 id="distinction"><span class="k">1.</span>The most important distinction</h2>
+<p class="lead">A 64-dimensional autoencoder does <b>not</b> become a 2-dimensional autoencoder just because we draw it in 2-D.</p>
+<p>When we run PCA on 64-number codes, the model has already learned its 64-number representation; we are only taking a <b>picture</b> of it from some angle. A model trained with a 2-number bottleneck is a different thing: it had to throw away everything that didn't fit into 2 numbers. To make this concrete, here are the <b>same 1,200 test slices</b> in four views.</p>
+</div>
+
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Same test slices, four different 2-D pictures (AE, IXI)</h4><span class="badge diag">actual run · colour = height in head</span></div>
+  <div class="ctl"><span class="l">model type</span><div class="seg" id="dsM"><button data-v="ae" class="on">AE</button><button data-v="vae01">VAE β=0.1</button><button data-v="vae1">VAE β=1</button></div></div>
+  <div class="two" style="grid-template-columns:repeat(4,1fr);gap:10px">
+    <div><div id="d1" class="chart sm" style="height:250px"></div><div class="lab"><b>trained with d = 2</b><br>the real latent space<br><span id="p2"></span></div></div>
+    <div><div id="d2" class="chart sm" style="height:250px"></div><div class="lab"><b>d = 64 → PCA</b><br>linear shadow<br><span id="p64"></span></div></div>
+    <div><div id="d3" class="chart sm" style="height:250px"></div><div class="lab"><b>d = 64 → t-SNE</b><br>local neighbours</div></div>
+    <div><div id="d4" class="chart sm" style="height:250px"></div><div class="lab"><b>d = 64 → UMAP</b><br>neighbours + some layout</div></div>
+  </div>
+  <figcaption><b>Figure 4.1.</b> All four panels show the same slices with the same colours. Panel 1 is a model that really has only 2 latent numbers; its reconstructions are poor (test PSNR 20.3 dB). Panels 2–4 are one 64-number model (26.5 dB) seen through three different projections. The 64-D model knows far more about each slice. The projections just can't show all of it in two axes, and each one drops different information.</figcaption>
+</div></div>
+
+<div class="article">
+<p>Here, the lesson is simple. Whenever you see a 2-D latent plot, ask: <b>is this the latent space, or a projection of it?</b> In the first case distances are real. In the second case, what you see depends on the method you used.</p>
+
+<h2 id="pca"><span class="k">2.</span>PCA: a straight shadow</h2>
+<p>Principal Component Analysis finds the directions along which the codes vary the most, and projects onto them. The first principal component (PC1) is the single direction with the largest variance, PC2 the largest remaining one at a right angle to PC1, and so on.</p>
+<div class="math">$$ \Sigma = \frac{1}{N}\sum_n (z_n-\bar z)(z_n-\bar z)^\top = V\Lambda V^\top, \qquad y_n = V_{[:,1:k]}^\top (z_n - \bar z) $$<div class="c">eigenvectors of the covariance matrix are the directions; eigenvalues λ<sub>j</sub> say how much variance each direction carries</div></div>
+<p>Because PCA is linear, distances in the PCA plot are an honest (shrunk) version of real distances. The price is that curved structure gets flattened. To know how much we lose, we look at the <b>explained variance ratio</b> \(\lambda_j / \sum_i \lambda_i\):</p>
+</div>
+
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Explained variance of the latent codes (d = 64)</h4><span class="badge diag">actual run · 4,000 test codes</span></div>
+  <div class="ctl"><span class="l">data</span><div class="seg" id="pvDs"><button data-v="ixi" class="on">IXI</button><button data-v="celeba">CelebA</button></div></div>
+  <div id="pvChart" class="chart"></div>
+  <figcaption><b>Figure 4.2.</b> Bars: variance per principal component. Lines: cumulative. For the IXI AE, PC1 alone carries 20% of the variance and the first 2 components only 32%, so a 2-D PCA picture shows about a third of what the model encodes. VAE β=1 is more concentrated in its first components, because it switched most of its 64 dimensions off (chapter 6).</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="tsne"><span class="k">3.</span>t-SNE: keep the neighbours together</h2>
+<p>t-SNE (t-distributed Stochastic Neighbor Embedding) doesn't try to keep distances at all. It only tries to keep <b>who is next to whom</b>. In high dimensions it turns distances into "neighbour probabilities" with a Gaussian; in 2-D it does the same with a heavy-tailed Student-t distribution, and moves the points until the two sets of probabilities match:</p>
+<div class="math">$$ p_{j|i} \propto \exp\!\Big(-\frac{\lVert z_i-z_j\rVert^2}{2\sigma_i^2}\Big), \qquad q_{ij} \propto \big(1+\lVert y_i-y_j\rVert^2\big)^{-1}, \qquad \min_y \; \mathrm{KL}(P\,\Vert\,Q) $$<div class="c">σ<sub>i</sub> is chosen per point so that each point has roughly "perplexity" effective neighbours</div></div>
+<p>The heavy tail of the t-distribution pushes moderately distant points far apart in 2-D, which is why t-SNE plots look so clustered. The main knob is <b>perplexity</b>, roughly "how many neighbours each point should care about". Same 64-D codes, three perplexities:</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>t-SNE perplexity sweep (AE, d = 64, same 1,200 slices)</h4><span class="badge diag">actual run</span></div>
+  <div class="three"><div><div id="ts5" class="chart sm"></div><div class="lab">perplexity 5</div></div><div><div id="ts30" class="chart sm"></div><div class="lab">perplexity 30 (default)</div></div><div><div id="ts100" class="chart sm"></div><div class="lab">perplexity 100</div></div></div>
+  <figcaption><b>Figure 4.3.</b> Low perplexity looks only at a handful of neighbours and breaks the data into many small islands that aren't real clusters. High perplexity looks at more neighbours and shows the smooth slice-height band more faithfully. The codes are identical in all three panels; only the picture changes.</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="umap"><span class="k">4.</span>UMAP: neighbours on a manifold</h2>
+<p>UMAP (Uniform Manifold Approximation and Projection) starts from the same idea, keep the neighbours, but builds it on the assumption that the data lie on a manifold. It connects each point to its <b>n_neighbors</b> nearest neighbours to build a weighted graph, then finds a 2-D layout with a similar graph. Two knobs matter:</p>
+<ul>
+  <li><b>n_neighbors</b>: how local the picture is. Small values zoom in on fine structure; large values preserve more global layout.</li>
+  <li><b>min_dist</b>: how tightly points may pack in 2-D. Small values make tight clumps; large values spread everything out evenly.</li>
+</ul>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>UMAP parameter sweeps (AE, d = 64, same 1,200 slices)</h4><span class="badge diag">actual run</span></div>
+  <div class="ctl"><span class="l">sweep</span><div class="seg" id="umSeg"><button data-v="nn" class="on">n_neighbors</button><button data-v="md">min_dist</button></div></div>
+  <div class="three"><div><div id="um0" class="chart sm"></div><div class="lab" id="uml0"></div></div><div><div id="um1" class="chart sm"></div><div class="lab" id="uml1"></div></div><div><div id="um2" class="chart sm"></div><div class="lab" id="uml2"></div></div></div>
+  <figcaption><b>Figure 4.4.</b> n_neighbors = 5 shreds the data into small fragments that aren't real groups; at 15 and 50 it becomes one connected piece with a smooth purple-to-yellow gradient, which is the real "slice height" structure. min_dist = 0 packs points into dense strands with empty space between them; 0.99 spreads the same points into an even blob. Every panel is "correct" UMAP output. That's why you should always state the parameters next to a UMAP plot.</figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="threed"><span class="k">5.</span>2-D or 3-D?</h2>
+<p>A third axis keeps more information: for PCA on the IXI AE, 3 components carry 41% of the variance instead of 32%. The price is that 3-D plots need rotating to read. Try both below. Drag to rotate the 3-D view; the bright ring is the picked slice.</p>
+</div>
+<div class="wide"><div class="fig">
+  <div class="fig-h"><h4>Latent space in 2-D and 3-D</h4><span class="badge int">interactive · actual run</span></div>
+  <div class="ctl">
+    <span class="l">model</span><div class="seg" id="exM"><button data-v="ae" class="on">AE</button><button data-v="vae01">VAE β=0.1</button><button data-v="vae1">VAE β=1</button></div>
+    <span class="l">d</span><div class="seg" id="exZ"></div>
+    <span class="l">method</span><div class="seg" id="exMe"><button data-v="pca">PCA</button><button data-v="tsne">t-SNE</button><button data-v="umap" class="on">UMAP</button></div>
+    <span class="l">view</span><div class="seg" id="exD"><button data-v="2">2D</button><button data-v="3" class="on">3D</button></div>
+    <span class="l">colour</span><div class="seg" id="exC"><button data-v="slice_pos" class="on">slice height</button><button data-v="cluster">k-means cluster</button><button data-v="mse">recon error</button></div>
+  </div>
+  <div id="exChart" class="chart lg"></div>
+  <div id="exPick" style="margin-top:8px"></div>
+  <figcaption id="exCap"></figcaption>
+</div></div>
+
+<div class="article">
+<h2 id="rules"><span class="k">6.</span>How to read these plots honestly</h2>
+<table class="t">
+  <tr><th>you see…</th><th>PCA</th><th>t-SNE / UMAP</th></tr>
+  <tr><td>two points close together</td><td>probably similar</td><td>similar (this is what they preserve)</td></tr>
+  <tr><td>two clusters far apart</td><td>really different, along that direction</td><td><b>can't tell</b>: gaps are not meaningful</td></tr>
+  <tr><td>one cluster bigger than another</td><td>more spread in the data</td><td><b>can't tell</b>: sizes are normalised away</td></tr>
+  <tr><td>a smooth band or curve</td><td>a real continuous factor</td><td>usually a real continuous factor</td></tr>
+  <tr><td>different picture on re-run</td><td>never (deterministic)</td><td>possible: depends on seed and parameters</td></tr>
+</table>
+<p>And a practical habit: use the <b>same samples</b> and the <b>same colours</b> when you compare projections or models, exactly as in Figures 4.1–4.4. Otherwise you are comparing samples, not methods.</p>
+<h3>Implementation</h3>
+<pre><code class="language-python">from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
+import umap
+
+z = latents                                          # (N, 64) codes from the encoder (VAE: posterior means)
+pca2 = PCA(n_components=2).fit(z - z.mean(0))
+print(pca2.explained_variance_ratio_)                 # how much of the picture we keep
+
+x = PCA(n_components=50).fit_transform(StandardScaler().fit_transform(z))   # standard speed-up
+tsne2 = TSNE(n_components=2, perplexity=30, init="pca", random_state=42).fit_transform(x)
+umap2 = umap.UMAP(n_neighbors=15, min_dist=0.1, random_state=42).fit_transform(x)</code></pre>
+
+<div class="warn"><b>Limitations.</b> All projections here use 1,200–4,000 test points, a fixed seed and standardised codes. t-SNE and UMAP results change with all three. For VAEs I plot the posterior means μ, not sampled codes.</div>
+<div class="key"><h4>Key takeaways</h4><ul>
+  <li>A projected 64-D space is a picture of a model, not a 2-D model. Compare both to see the difference.</li>
+  <li>PCA is linear and honest about distances; check the explained variance to know how much it hides.</li>
+  <li>t-SNE and UMAP preserve neighbourhoods. Gaps and cluster sizes are not evidence of anything.</li>
+  <li>Always report perplexity or n_neighbors/min_dist, and compare methods on the same samples.</li>
+</ul></div>
+<h3>References</h3>
+<ol class="refs">
+  <li>Pearson (1901); Hotelling (1933). Principal component analysis.</li>
+  <li>van der Maaten, Hinton (2008). Visualizing Data using t-SNE. <i>JMLR</i> 9.</li>
+  <li>McInnes, Healy, Melville (2018). UMAP: Uniform Manifold Approximation and Projection. arXiv:1802.03426.</li>
+  <li>Wattenberg, Viégas, Johnson (2016). How to Use t-SNE Effectively. <i>Distill</i>.</li>
+</ol>
+<div class="pager"></div>
+</div>
+</main></div>
+<script src="../assets/site.js"></script>
+<script>
+data().then(({D, D2}) => {
+  const mini = (el, xy, col, title) => Plotly.react(el, [{x: xy.map(p => p[0]), y: xy.map(p => p[1]), mode: "markers", type: "scattergl", hoverinfo: "skip",
+    marker: {size: 3.6, color: col, colorscale: "Viridis", opacity: .85}}], lay({margin: {l: 6, r: 6, t: 6, b: 6}, xaxis: {visible: false}, yaxis: {visible: false}, showlegend: false}), PCFG);
+  const pv = D2.pca_var;
+  const getM = seg($("#dsM"), () => four());
+  function four() {
+    const mk = getM(), a = D.explorer[`ixi_${mk}_2`], b = D.explorer[`ixi_${mk}_64`], c = a.lab.slice_pos;
+    mini("d1", a.raw_2d, c); mini("d2", b.pca_2d, b.lab.slice_pos); mini("d3", b.tsne_2d, b.lab.slice_pos); mini("d4", b.umap_2d, b.lab.slice_pos);
+    const R = results(D, "ixi"), p = z => R.find(r => r.mk === mk && r.latent_dim === z)?.psnr_mean?.toFixed(1);
+    $("#p2").textContent = `test PSNR ${p(2)} dB`; $("#p64").textContent = `test PSNR ${p(64)} dB · PC1+PC2 = ${Math.round(100 * (pv[`ixi_${mk}_64`][0] + pv[`ixi_${mk}_64`][1]))}% var`;
+  }
+  four();
+  // explained variance
+  const getPv = seg($("#pvDs"), () => pvDraw());
+  function pvDraw() {
+    const ds = getPv(), tr = [];
+    for (const mk of Object.keys(MODELS)) {
+      const r = pv[`${ds}_${mk}_64`]; if (!r) continue; let c = 0; const cum = r.map(v => c += v);
+      tr.push({x: r.map((_, i) => i + 1), y: r, type: "bar", name: `${MODELS[mk]} · per component`, marker: {color: MCOL[mk]}, opacity: .55});
+      tr.push({x: cum.map((_, i) => i + 1), y: cum, mode: "lines+markers", name: `${MODELS[mk]} · cumulative`, line: {color: MCOL[mk], width: 2.4}, marker: {size: 4}, yaxis: "y"});
+    }
+    Plotly.react("pvChart", tr, lay({barmode: "group", bargap: .15, xaxis: {title: "principal component", dtick: 2, gridcolor: "#eef2f7"}, yaxis: {title: "explained variance ratio", tickformat: ".0%", gridcolor: "#eef2f7"}, legend: {orientation: "h", y: 1.2, font: {size: 11}}}), PCFG);
+  }
+  pvDraw();
+  // t-SNE sweep
+  const sp = D2.sweep.slice_pos;
+  ["5", "30", "100"].forEach(p => mini(`ts${p}`, D2.sweep.tsne[p], sp));
+  const getUm = seg($("#umSeg"), () => umDraw());
+  function umDraw() {
+    const m = getUm(), src = m === "nn" ? D2.sweep.umap_nn : D2.sweep.umap_md, keys = Object.keys(src);
+    keys.forEach((k, i) => { mini(`um${i}`, src[k], sp); $(`#uml${i}`).textContent = m === "nn" ? `n_neighbors = ${k} (min_dist 0.1)` : `min_dist = ${k} (n_neighbors 15)`; });
+  }
+  umDraw();
+  // interactive explorer
+  let st = {ds: "ixi", mk: "ae", z: 64, method: "umap", dim: "3", colour: "slice_pos", pick: 3};
+  const zs = () => [2, 3, 8, 16, 64, 128].filter(z => D.explorer[`ixi_${st.mk}_${z}`]);
+  const zctl = () => { if (!zs().includes(st.z)) st.z = 64; setSeg($("#exZ"), zs(), null, st.z); };
+  const go = () => {
+    const name = scatter("exChart", D, st);
+    $("#exCap").innerHTML = `<b>Figure 4.5.</b> ${MODELS[st.mk]}, d = ${st.z}. ` + (name.startsWith("raw") ? "No projection: these are the real latent axes. " : `Projected with ${st.method.toUpperCase()} to ${st.dim}-D. `) +
+      "Colour by k-means cluster to see the 6 groups found in the full code space; colour by reconstruction error to see that the hardest slices (low in the head) sit together.";
+  };
+  for (const [id, key] of [["#exM", "mk"], ["#exZ", "z"], ["#exMe", "method"], ["#exD", "dim"], ["#exC", "colour"]]) seg($(id), v => { st[key] = key === "z" ? +v : v; zctl(); go(); });
+  zctl(); picker($("#exPick"), D, k => { st.pick = k; go(); });
+});
+</script>
+</body></html>

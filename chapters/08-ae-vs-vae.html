@@ -48,7 +48,7 @@
     <div><canvas id="pb" width="600" height="600" style="width:100%;aspect-ratio:1;border-radius:10px;background:#000"></canvas><div class="lab" style="color:var(--v01)">VAE β=0.1</div></div>
     <div><canvas id="pc" width="600" height="600" style="width:100%;aspect-ratio:1;border-radius:10px;background:#000"></canvas><div class="lab" style="color:var(--v1)">VAE β=1</div></div>
   </div>
-  <figcaption><b>Figure 8.2.</b> Each panel: real test codes (dots, coloured by slice height) on top of what the decoder draws everywhere. All three learn the same anatomy-ordered layout. The AE spreads it over irregular arms, the VAEs pack it into a rounder region. The β=1 map is the smoothest and also the blurriest. Explore them with the mouse in chapter 3.</figcaption>
+  <figcaption><b>Figure 8.2.</b> Each panel: real test codes (dots, coloured by slice height) on top of what the decoder draws everywhere. All three learn the same anatomy-ordered layout. The AE spreads it widely over irregular arms. VAE β=0.1 pulls it in to about half that spread. VAE β=1 packs it into a compact cloud centred on 0 with a spread of about 1, the shape of the prior; its map is the smoothest and also the blurriest. Explore them with the mouse in chapter 3.</figcaption>
 </div></div>
 
 <div class="article"><h2 id="gen"><span class="k">4.</span>Generation and interpolation</h2></div>

@@ -246,7 +246,7 @@ def main():
         for ci in order:
             members = np.where(km.labels_ == ci)[0]
             centre = torch.tensor(km.cluster_centers_[ci]).float()[None]
-            row = [m.decode(centre)[0], None]
+            row = [m.decode(centre)[0]]
             if ds == "ixi":
                 near = members[np.argsort(((lat[members] - km.cluster_centers_[ci]) ** 2).sum(1))[:6]]
                 row += [ixi_test[int(c["test_index"][j])] for j in near]

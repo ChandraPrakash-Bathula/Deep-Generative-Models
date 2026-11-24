@@ -180,7 +180,7 @@ function scatter(el, D, s, {picks = true, height} = {}) {
   const k = +s.dim, name = s.z <= k ? `raw_${Math.min(s.z, k)}d` : `${s.method}_${k}d`;
   const emb = e[name], kk = emb[0].length, all = [...emb.keys()];
   const xyz = idx => ({x: idx.map(i => emb[i][0]), y: idx.map(i => emb[i][1]), ...(kk === 3 ? {z: idx.map(i => emb[i][2])} : {})});
-  const type = kk === 3 ? "scatter3d" : "scattergl", size = kk === 3 ? 2.6 : 5, tr = [], base = {mode: "markers", hoverinfo: "skip"};
+  const type = kk === 3 ? "scatter3d" : "scatter", size = kk === 3 ? 2.6 : 5, tr = [], base = {mode: "markers", hoverinfo: "skip"};
   const lab = s.colour === "cluster" ? e.cluster : e.lab[s.colour];
   if (s.colour === "cluster") for (let c = 0; c < 6; c++) { const idx = all.filter(i => lab[i] === c); tr.push({...base, type, ...xyz(idx), name: `cluster ${c + 1}`, marker: {size, color: CLUSTER[c], opacity: .8}}); }
   else if (s.ds === "celeba") for (const [v, nm, col] of [[0, "no", "#cbd5e1"], [1, "yes", "#db2777"]]) { const idx = all.filter(i => lab[i] === v); tr.push({...base, type, ...xyz(idx), name: `${s.colour.replace("_", " ")}: ${nm}`, marker: {size, color: col, opacity: v ? .9 : .55}}); }

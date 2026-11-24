@@ -39,13 +39,13 @@
 <p>So the decoder is fine. The problem is <b>where the random numbers land</b>. The usual random numbers come from a standard bell curve, N(0, 1): mostly between −2 and +2. But nobody told the AE to put its codes there. On our z = 16 AE, the codes have an average size of <b>2.7</b> and a spread between <b>4.6 and 8.6</b> per number. Most random draws simply land in places the decoder has never seen.</p>
 
 <h2 id="s2" data-short="2 · Gaps in the latent space"><span class="k">2.</span>Deterministic codes leave irregular gaps</h2>
-<p>A plain autoencoder maps each image to exactly <b>one point</b>. The loss only cares that each point can be decoded back into its own image. It says nothing about the space <i>between</i> points, so the model is free to scatter its codes in odd shapes, with empty regions in between. The left plot shows the real codes of the 2-number AE and VAE (dots only): the AE has long arms and gaps, the VAE a compact blob.</p>
+<p>A plain autoencoder maps each image to exactly <b>one point</b>. The loss only cares that each point can be decoded back into its own image. It says nothing about the space <i>between</i> points, so the model is free to scatter its codes in odd shapes, with empty regions in between. The plots below show the real codes of the 2-number models: the AE has long arms, gaps and far-away outliers; the VAEs are pulled in toward the centre, and the stronger the KL weight β, the closer they get to the prior.</p>
 </div>
 <div class="wide"><div class="two">
   <div class="fig"><div class="fig-h"><h4>AE, d = 2: one point per image</h4><span class="badge real">test codes</span></div><div id="ptsAE" class="chart sm"></div></div>
-  <div class="fig"><div class="fig-h"><h4>VAE β=0.1, d = 2: means μ of the clouds</h4><span class="badge real">test codes</span></div><div id="ptsVAE" class="chart sm"></div></div>
+  <div class="fig"><div class="fig-h"><h4>VAE, d = 2: means μ of the clouds</h4><div class="seg" id="ptsSeg"><button data-v="vae01">β = 0.1</button><button data-v="vae1" class="on">β = 1</button></div></div><div id="ptsVAE" class="chart sm"></div></div>
 </div>
-<p class="cap" style="max-width:760px;margin:0 auto"><b>Figure 6.2.</b> 1,500 real test slices, coloured by height in the head. Note the axis ranges: the AE's codes spread over tens of units in strange shapes; the VAE's means sit in a round region of a few units around 0, close to where N(0, I) puts its samples. A random point in the AE's box often falls in a gap; in the VAE's box it almost always lands near real data.</p></div>
+<p class="cap" style="max-width:760px;margin:0 auto"><b>Figure 6.2.</b> 1,500 real test slices, coloured by height in the head; the axes are drawn to the same scale as the AE. The AE's codes have a spread of about 3 with arms reaching +27 and −18. VAE β = 0.1 roughly halves that (spread 1.5–2, still stretched), and VAE β = 1 sits right where the prior is: centred on 0 with a spread of about 1.0, almost everything within ±4. A random N(0, I) point often falls in a gap of the AE's map; in the β = 1 map it almost always lands near real data.</p></div>
 
 <div class="article">
 <h2 id="s3" data-short="3 · Why probability distributions"><span class="k">3.</span>So we introduce probability distributions</h2>
@@ -190,9 +190,10 @@ samples = model.decoder(torch.randn(16, latent_dim))</code></pre>
 <script src="../assets/site.js"></script>
 <script>
 data().then(({D, D2}) => {
-  const pts = (el, P) => Plotly.newPlot(el, [{x: P.x, y: P.y, mode: "markers", type: "scattergl", hoverinfo: "skip", marker: {size: 4, color: P.c, colorscale: "Viridis", opacity: .8}}],
-    lay({margin: {l: 46, r: 10, t: 10, b: 40}, xaxis: {title: "z₁", gridcolor: "#eef2f7", zerolinecolor: "#94a3b8"}, yaxis: {title: "z₂", gridcolor: "#eef2f7", zerolinecolor: "#94a3b8", scaleanchor: "x"}, showlegend: false}), PCFG);
-  pts("ptsAE", D.planes.ixi_ae); pts("ptsVAE", D.planes.ixi_vae01);
+  const pts = (el, P) => Plotly.newPlot(el, [{x: P.x, y: P.y, mode: "markers", type: "scatter", hoverinfo: "skip", marker: {size: 4, color: P.c, colorscale: "Viridis", opacity: .8}}],
+    lay({margin: {l: 46, r: 10, t: 10, b: 40}, xaxis: {title: "z₁", range: [-12, 30], gridcolor: "#eef2f7", zerolinecolor: "#94a3b8"}, yaxis: {title: "z₂", range: [-20, 10], gridcolor: "#eef2f7", zerolinecolor: "#94a3b8"}, showlegend: false}), PCFG);
+  pts("ptsAE", D.planes.ixi_ae); pts("ptsVAE", D.planes.ixi_vae1);
+  seg($("#ptsSeg"), v => pts("ptsVAE", D.planes[`ixi_${v}`]));
   // mu / sigma cells
   picker($("#muPick"), D, k => {
     $("#muIn").src = A(`pick_${k}.png`);

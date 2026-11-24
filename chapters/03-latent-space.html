@@ -68,7 +68,7 @@
 <ol>
   <li><b>Similar slices sit together.</b> The colours form a smooth band from purple (low slices) to yellow (high slices). The model organised its latent space by anatomy without ever being told about it.</li>
   <li><b>The decoder draws something everywhere</b>, even where there are no dots. In the empty corners it has to guess, and those images are less realistic. Remember this, it is the key to chapter 6.</li>
-  <li><b>The shape of the cloud depends on the model.</b> Switch to "dots only" and compare AE with VAE. The AE spreads its codes in long arms with empty space between them. The VAE packs them into a round blob near the centre. Same data, same decoder, different rules.</li>
+  <li><b>The shape of the cloud depends on the model.</b> Switch to "dots only" and compare AE with VAE. The AE spreads its codes widely, in long arms with empty space between them (one number reaches +27). VAE β=0.1 roughly halves that spread but is still stretched. VAE β=1 packs them into a compact cloud centred on 0 with a spread of about 1, which is exactly the shape of the prior N(0, 1). Same data, same decoder, different rules.</li>
 </ol>
 
 <h2 id="size"><span class="k">4.</span>What happens when we change the latent size?</h2>
@@ -130,7 +130,7 @@ data().then(({D}) => {
   seg($("#travSeg"), v => $("#travImg").src = A(`traverse_ixi_${v}_2.png`)); $("#travImg").src = A("traverse_ixi_ae_2.png");
   let pk = 3;
   const getDs = seg($("#plDs"), () => draw()), getM = seg($("#plM"), () => draw()), getL = seg($("#plL"), () => draw());
-  const notes = {ae: "AE: codes spread in long arms, with empty regions between them.", vae01: "VAE β=0.1: codes packed into a rounder cloud near 0.", vae1: "VAE β=1: the tightest, smoothest map, and the blurriest images."};
+  const notes = {ae: "AE: codes spread in long arms, with empty regions between them.", vae01: "VAE β=0.1: about half the AE's spread, closer to 0, but still stretched in strips.", vae1: "VAE β=1: a compact cloud centred on 0 with spread ≈ 1 (the shape of N(0, 1)); the smoothest map and the blurriest images."};
   const draw = planeWidget(D, $("#plC"), $("#plP"), $("#plR"), () => ({ds: getDs(), mk: getM(), layer: getL()}), {pick: () => pk, after: s => {
     $("#plLeg").innerHTML = s.ds === "ixi" ? `<span>dots: real test slices, coloured by height in head</span><span>low<span class="vir"></span>high</span><span><i style="background:transparent;border:2px solid #38bdf8"></i>picked slice</span>`
       : `<span><i style="background:#60a5fa"></i>male</span><span><i style="background:#f472b6"></i>female</span><span>background tiles are generated faces (no real CelebA faces are shown)</span>`;

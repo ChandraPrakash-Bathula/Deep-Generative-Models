@@ -150,7 +150,7 @@ umap2 = umap.UMAP(n_neighbors=15, min_dist=0.1, random_state=42).fit_transform(x
 <script src="../assets/site.js"></script>
 <script>
 data().then(({D, D2}) => {
-  const mini = (el, xy, col, title) => Plotly.react(el, [{x: xy.map(p => p[0]), y: xy.map(p => p[1]), mode: "markers", type: "scattergl", hoverinfo: "skip",
+  const mini = (el, xy, col, title) => Plotly.react(el, [{x: xy.map(p => p[0]), y: xy.map(p => p[1]), mode: "markers", type: "scatter", hoverinfo: "skip",
     marker: {size: 3.6, color: col, colorscale: "Viridis", opacity: .85}}], lay({margin: {l: 6, r: 6, t: 6, b: 6}, xaxis: {visible: false}, yaxis: {visible: false}, showlegend: false}), PCFG);
   const pv = D2.pca_var;
   const getM = seg($("#dsM"), () => four());
